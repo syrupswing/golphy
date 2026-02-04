@@ -18,11 +18,9 @@
 .score-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: $font-sm;
   min-width: 800px;
 
   th, td {
-    padding: $spacing-sm;
     text-align: center;
     border: 1px solid #ddd;
   }
@@ -33,7 +31,7 @@
       color: $white;
       font-weight: 700;
       font-size: $font-xs;
-      padding: $spacing-sm $spacing-xs;
+      padding: 4px 16px;
 
       &.player-header {
         text-align: left;
@@ -76,81 +74,130 @@
     }
 
     .player-row {
+      color: #888;
+      font-family: 'Nanum Brush Script', cursive;
+      font-size: 32px;
+      line-height: 1;
+
       &:nth-child(even) {
         background: color.adjust($white, $lightness: -2%);
       }
 
       .player-cell {
         text-align: left;
-        padding: $spacing-sm $spacing-md;
+        padding: 4px 16px;
 
         .player-info {
           display: flex;
           align-items: center;
           gap: $spacing-sm;
 
-          .player-color-indicator {
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            flex-shrink: 0;
-          }
-
           .player-name {
-            font-weight: 600;
-            font-size: $font-sm;
+            transform: translateY(4px);
           }
         }
       }
 
       .score-cell {
-        font-weight: 600;
+        font-weight: 500;
         font-size: $font-md;
-        transition: background-color 0.2s ease;
+        transition: border 0.2s ease;
+        font-family: 'Nanum Brush Script', cursive;
+        font-size: 40px;
+        line-height: 1;
+        color: $gray;
+        background: $white;
+        position: relative;
+        cursor: pointer;
 
-        &.empty {
-          color: $gray;
-          font-weight: 400;
+        .score-input {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          opacity: 0;
+          cursor: pointer;
+          font-family: 'Nanum Brush Script', cursive;
+          font-size: 40px;
+          text-align: center;
+          border: none;
+          background: transparent;
+          color: transparent;
+          
+          &:focus {
+            opacity: 1;
+            color: $gray;
+            background: rgba(255, 255, 255, 0.9);
+            outline: 2px solid $primary-color;
+            z-index: 10;
+          }
+
+          // Hide number input spinners
+          &::-webkit-outer-spin-button,
+          &::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+          }
+          -moz-appearance: textfield;
         }
 
-        &.eagle {
-          background: #f39c12;
-          color: $white;
-          font-weight: 800;
-        }
-
-        &.birdie {
-          background: #e74c3c;
-          color: $white;
-          font-weight: 700;
-        }
-
-        &.par {
-          background: $white;
-          color: $dark-color;
-        }
-
-        &.bogey {
-          background: #3498db;
-          color: $white;
-        }
-
+        &.birdie,
+        &.eagle,
+        &.bogey,
         &.double-bogey {
-          background: #2c3e50;
-          color: $white;
+            &::before,
+            &::after {
+                box-sizing: content-box;
+                content: " ";
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                height: 0;
+                border: 1px solid $gray;
+            }
+            &::before {
+                width: 32px;
+                padding-bottom: 34px;
+                margin: -18px 0 0 -17px;
+            }
+        }
+        &.birdie,
+        &.eagle {
+            &::before,
+            &::after {
+                border-radius: 50%;
+            }
+        }
+        &.eagle,
+        &.double-bogey {
+            &::after {
+                width: 26px;
+                padding-bottom: 28px;
+                margin: -15px 0 0 -14px;
+                pointer-events: none;
+            }
+        }
+        &.birdie,
+        &.bogey {
+            &::after {
+                display: none;
+            }
         }
       }
 
       .total-cell {
         background: $light-color;
-        font-weight: 700;
-        font-size: $font-md;
+        font-weight: 600;
 
         &.bold {
           background: color.adjust($primary-color, $lightness: 35%);
-          font-weight: 800;
-          font-size: $font-lg;
+          font-weight: 600;
         }
+      }
+      .score-text {
+        display: inline-block;
+        transform: translateY(4px);
       }
     }
   }
@@ -177,29 +224,47 @@
     gap: $spacing-xs;
 
     .legend-color {
-      width: 20px;
-      height: 20px;
-      border-radius: $border-radius-sm;
-      border: 1px solid #ddd;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: #333;
+      background: $white;
+      position: relative;
 
-      &.eagle {
-        background: #f39c12;
-      }
-
+      &.eagle,
       &.birdie {
-        background: #e74c3c;
+        border: 1px solid $gray;
+        border-radius: 50%;
       }
 
       &.par {
-        background: $white;
+        border: none;
       }
 
       &.bogey {
-        background: #3498db;
+        border: 1px solid $gray;
+        border-radius: 0;
       }
 
       &.double-bogey {
-        background: #2c3e50;
+        border: 1px solid $gray;
+        border-radius: 0;
+      }
+
+      &.eagle,
+      &.double-bogey {
+        &::after {
+            box-sizing: content-box;
+            content: " ";
+            border: 1px solid $gray;
+            padding: 8px;
+        }
+      }
+      &.eagle::after {
+        border-radius: 50%;
       }
     }
 

@@ -7,9 +7,10 @@ interface ScoreTableProps {
   scores: Score[];
   totalHoles: number;
   parValues: number[];
+  onScoreUpdate?: (playerId: string, hole: number, strokes: number) => void;
 }
 
-export default function ScoreTable({ players, scores, totalHoles, parValues }: ScoreTableProps) {
+export default function ScoreTable({ players, scores, totalHoles, parValues, onScoreUpdate }: ScoreTableProps) {
   const getScore = (playerId: string, hole: number): number | null => {
     const score = scores.find(s => s.playerId === playerId && s.hole === hole);
     return score ? score.strokes : null;
@@ -52,18 +53,54 @@ export default function ScoreTable({ players, scores, totalHoles, parValues }: S
     return parValues.reduce((sum, par) => sum + par, 0);
   };
 
+  const handleScoreChange = (playerId: string, hole: number, value: string) => {
+    if (!onScoreUpdate) return;
+    
+    if (value === '' || value === '0') {
+      // Delete the score by passing 0
+      onScoreUpdate(playerId, hole, 0);
+    } else {
+      const numValue = parseInt(value);
+      if (!isNaN(numValue) && numValue > 0) {
+        onScoreUpdate(playerId, hole, numValue);
+      }
+    }
+  };
+
   const renderHoleCell = (playerId: string, hole: number, par: number) => {
     const score = getScore(playerId, hole);
-    if (score === null) return <td className="score-cell empty">-</td>;
+    const displayScore = score || '';
 
     let className = 'score-cell';
-    if (score === par - 2) className += ' eagle';
-    else if (score === par - 1) className += ' birdie';
-    else if (score === par) className += ' par';
-    else if (score === par + 1) className += ' bogey';
-    else if (score > par + 1) className += ' double-bogey';
+    if (score === null) {
+      className += ' empty';
+    } else if (score === par - 2 || score < par - 2) {
+      className += ' eagle';
+    } else if (score === par - 1) {
+      className += ' birdie';
+    } else if (score === par) {
+      className += ' par';
+    } else if (score === par + 1) {
+      className += ' bogey';
+    } else if (score > par + 1) {
+      className += ' double-bogey';
+    }
 
-    return <td className={className}>{score}</td>;
+    return (
+      <td className={className}>
+        <span className="score-text">{displayScore}</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          className="score-input"
+          value={displayScore}
+          onChange={(e) => handleScoreChange(playerId, hole, e.target.value)}
+          placeholder=""
+          min="1"
+          max="20"
+        />
+      </td>
+    );
   };
 
   return (
@@ -101,10 +138,6 @@ export default function ScoreTable({ players, scores, totalHoles, parValues }: S
               <tr key={player.id} className="player-row">
                 <td className="player-cell">
                   <div className="player-info">
-                    <div 
-                      className="player-color-indicator" 
-                      style={{ backgroundColor: player.color }}
-                    />
                     <span className="player-name">{player.name}</span>
                   </div>
                 </td>
@@ -113,14 +146,14 @@ export default function ScoreTable({ players, scores, totalHoles, parValues }: S
                     {renderHoleCell(player.id, hole, parValues[hole - 1])}
                   </React.Fragment>
                 )}
-                <td className="total-cell">{getOutScore(player.id) || '-'}</td>
+                <td className="total-cell"><span className="score-text">{getOutScore(player.id) || '-'}</span></td>
                 {[10, 11, 12, 13, 14, 15, 16, 17, 18].map(hole => 
                   <React.Fragment key={hole}>
                     {renderHoleCell(player.id, hole, parValues[hole - 1])}
                   </React.Fragment>
                 )}
-                <td className="total-cell">{getInScore(player.id) || '-'}</td>
-                <td className="total-cell bold">{getTotalScore(player.id) || '-'}</td>
+                <td className="total-cell"><span className="score-text">{getInScore(player.id) || '-'}</span></td>
+                <td className="total-cell bold"><span className="score-text">{getTotalScore(player.id) || '-'}</span></td>
               </tr>
             ))}
           </tbody>

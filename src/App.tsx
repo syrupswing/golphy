@@ -65,11 +65,24 @@ function App() {
       );
 
       let newScores: Score[];
-      if (existingScoreIndex >= 0) {
-        newScores = [...prev.scores];
-        newScores[existingScoreIndex] = { playerId, hole, strokes };
+      
+      // If strokes is 0, remove the score
+      if (strokes === 0) {
+        if (existingScoreIndex >= 0) {
+          newScores = prev.scores.filter(
+            s => !(s.playerId === playerId && s.hole === hole)
+          );
+        } else {
+          newScores = prev.scores;
+        }
       } else {
-        newScores = [...prev.scores, { playerId, hole, strokes }];
+        // Otherwise update or add the score
+        if (existingScoreIndex >= 0) {
+          newScores = [...prev.scores];
+          newScores[existingScoreIndex] = { playerId, hole, strokes };
+        } else {
+          newScores = [...prev.scores, { playerId, hole, strokes }];
+        }
       }
 
       return { ...prev, scores: newScores };
@@ -198,6 +211,7 @@ function App() {
           scores={gameState.scores}
           totalHoles={gameState.totalHoles}
           parValues={DEFAULT_PAR}
+          onScoreUpdate={updateScore}
         />
       )}
     </div>
