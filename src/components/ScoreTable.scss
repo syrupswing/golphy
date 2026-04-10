@@ -128,9 +128,10 @@
           &:focus {
             opacity: 1;
             color: $gray;
-            background: rgba(255, 255, 255, 0.9);
+            background: $white;
             outline: 2px solid $primary-color;
             z-index: 10;
+            outline-offset: -2px;
           }
 
           // Hide number input spinners

@@ -95,6 +95,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, onS
           className="score-input"
           value={displayScore}
           onChange={(e) => handleScoreChange(playerId, hole, e.target.value)}
+          onFocus={(e) => e.target.select()}
           placeholder=""
           min="1"
           max="20"
@@ -146,14 +147,14 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, onS
                     {renderHoleCell(player.id, hole, parValues[hole - 1])}
                   </React.Fragment>
                 )}
-                <td className="total-cell"><span className="score-text">{getOutScore(player.id) || '-'}</span></td>
+                <td className="total-cell"><span className="score-text">{getOutScore(player.id) || ''}</span></td>
                 {[10, 11, 12, 13, 14, 15, 16, 17, 18].map(hole => 
                   <React.Fragment key={hole}>
                     {renderHoleCell(player.id, hole, parValues[hole - 1])}
                   </React.Fragment>
                 )}
-                <td className="total-cell"><span className="score-text">{getInScore(player.id) || '-'}</span></td>
-                <td className="total-cell bold"><span className="score-text">{getTotalScore(player.id) || '-'}</span></td>
+                <td className="total-cell"><span className="score-text">{getInScore(player.id) || ''}</span></td>
+                <td className="total-cell bold"><span className="score-text">{getTotalScore(player.id) || ''}</span></td>
               </tr>
             ))}
           </tbody>
