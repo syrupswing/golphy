@@ -7,10 +7,11 @@ interface ScoreTableProps {
   scores: Score[];
   totalHoles: number;
   parValues: number[];
+  courseName?: string;
   onScoreUpdate?: (playerId: string, hole: number, strokes: number) => void;
 }
 
-export default function ScoreTable({ players, scores, totalHoles, parValues, onScoreUpdate }: ScoreTableProps) {
+export default function ScoreTable({ players, scores, totalHoles, parValues, courseName, onScoreUpdate }: ScoreTableProps) {
   const getScore = (playerId: string, hole: number): number | null => {
     const score = scores.find(s => s.playerId === playerId && s.hole === hole);
     return score ? score.strokes : null;
@@ -106,6 +107,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, onS
 
   return (
     <div className="score-table-container">
+      {courseName && <h2 className="course-name-heading">{courseName}</h2>}
       <div className="table-wrapper">
         <table className="score-table">
           <thead>

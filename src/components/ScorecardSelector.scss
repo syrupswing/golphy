@@ -1,0 +1,215 @@
+@use 'sass:color';
+@use '../styles/variables' as *;
+
+.scorecard-selector {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.scorecard-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.scorecard-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: $spacing-sm $spacing-md;
+  background: $light-color;
+  border-radius: $border-radius-sm;
+  font-weight: 600;
+  font-size: $font-sm;
+  border: 2px solid transparent;
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    background: color.adjust($light-color, $lightness: -5%);
+  }
+
+  &.selected {
+    border-color: $primary-color;
+    background: color.adjust($primary-color, $lightness: 38%);
+  }
+
+  &.add-new {
+    color: $secondary-color;
+    font-weight: 700;
+  }
+
+  .scorecard-holes {
+    font-size: $font-xs;
+    font-weight: 400;
+    color: $gray;
+  }
+}
+
+.scorecard-form {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  background: $light-color;
+  border-radius: $border-radius-md;
+  padding: $spacing-md;
+
+  input[type='text'] {
+    width: 100%;
+    padding: $spacing-sm $spacing-md;
+    border-radius: $border-radius-sm;
+    font-size: $font-md;
+    border: 1px solid color.adjust($light-color, $lightness: -15%);
+  }
+
+  .hole-count-toggle {
+    display: flex;
+    gap: $spacing-sm;
+
+    button {
+      flex: 1;
+      padding: $spacing-sm;
+      background: $white;
+      border-radius: $border-radius-sm;
+      font-weight: 600;
+      font-size: $font-sm;
+      border: 2px solid transparent;
+
+      &.active {
+        border-color: $primary-color;
+        background: color.adjust($primary-color, $lightness: 38%);
+      }
+    }
+  }
+
+  .set-section {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+    border-top: 1px solid color.adjust($light-color, $lightness: -12%);
+    padding-top: $spacing-sm;
+  }
+
+  .set-alias-input {
+    width: 100%;
+    padding: $spacing-sm $spacing-md;
+    border-radius: $border-radius-sm;
+    font-size: $font-sm;
+    font-weight: 600;
+    border: 1px solid color.adjust($light-color, $lightness: -15%);
+    background: $white;
+  }
+
+  .set-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+
+  .set-table {
+    border-collapse: collapse;
+    min-width: 500px;
+    width: 100%;
+    font-size: $font-sm;
+
+    th, td {
+      text-align: center;
+      border: 1px solid color.adjust($light-color, $lightness: -15%);
+      padding: 0;
+    }
+
+    thead th {
+      background: $dark-color;
+      color: $white;
+      font-weight: 700;
+      font-size: $font-xs;
+      padding: 4px 6px;
+      min-width: 32px;
+
+      &.row-header {
+        min-width: 50px;
+      }
+
+      &.subtotal-header {
+        background: color.adjust($dark-color, $lightness: -5%);
+        min-width: 42px;
+      }
+    }
+
+    tbody {
+      .row-label {
+        text-align: left;
+        padding: 4px $spacing-sm;
+        font-weight: 700;
+        font-size: $font-xs;
+        background: $light-color;
+        color: $dark-color;
+        white-space: nowrap;
+      }
+
+      .subtotal {
+        background: color.adjust($light-color, $lightness: -5%);
+        font-weight: 700;
+        font-size: $font-xs;
+        padding: 4px 6px;
+      }
+    }
+
+    .set-cell {
+      input {
+        width: 100%;
+        min-width: 32px;
+        border: none;
+        background: transparent;
+        text-align: center;
+        font-size: $font-sm;
+        padding: 4px 2px;
+        font-family: inherit;
+        color: $dark-color;
+
+        &:focus {
+          outline: 2px solid $primary-color;
+          outline-offset: -2px;
+          background: $white;
+          z-index: 1;
+          position: relative;
+        }
+
+        &::-webkit-outer-spin-button,
+        &::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+
+        -moz-appearance: textfield;
+
+        &::placeholder {
+          color: color.adjust($gray, $lightness: 10%);
+        }
+      }
+    }
+  }
+
+  .create-error {
+    color: $danger-color;
+    font-size: $font-sm;
+  }
+
+  .create-btn {
+    background: $primary-color;
+    color: $white;
+    border-radius: $border-radius-sm;
+    padding: $spacing-sm $spacing-md;
+    font-weight: 600;
+    align-self: flex-start;
+
+    &:hover {
+      background: color.adjust($primary-color, $lightness: -8%);
+    }
+
+    &:disabled {
+      background: $gray;
+      cursor: not-allowed;
+    }
+  }
+}

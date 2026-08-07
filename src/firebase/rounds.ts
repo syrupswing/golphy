@@ -16,6 +16,10 @@ interface RoundDocument {
   scores: Score[];
   currentHole: number;
   totalHoles: number;
+  alias?: string;
+  parValues?: number[];
+  scorecardId?: string;
+  scorecardName?: string;
   createdBy: string;
   updatedBy: string;
   createdAt?: unknown;
@@ -42,6 +46,10 @@ const toRoundDocument = (state: GameState, clientId: string): RoundDocument => (
   scores: state.scores,
   currentHole: state.currentHole,
   totalHoles: state.totalHoles,
+  alias: state.alias ?? '',
+  parValues: state.parValues ?? [],
+  scorecardId: state.scorecardId ?? '',
+  scorecardName: state.scorecardName ?? '',
   createdBy: clientId,
   updatedBy: clientId,
 });
@@ -51,6 +59,10 @@ const parseRoundDocument = (data: RoundDocument): GameState => ({
   scores: data.scores ?? [],
   currentHole: data.currentHole ?? 1,
   totalHoles: data.totalHoles ?? 18,
+  alias: data.alias ?? '',
+  parValues: data.parValues?.length ? data.parValues : undefined,
+  scorecardId: data.scorecardId || undefined,
+  scorecardName: data.scorecardName || undefined,
 });
 
 const ensureFirebase = () => {
@@ -153,6 +165,10 @@ export const updateRound = async (
       scores: state.scores,
       currentHole: state.currentHole,
       totalHoles: state.totalHoles,
+      alias: state.alias ?? '',
+      parValues: state.parValues ?? [],
+      scorecardId: state.scorecardId ?? '',
+      scorecardName: state.scorecardName ?? '',
       updatedBy: clientId,
       updatedAt: serverTimestamp(),
     });
