@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Demo-friendly: anyone with a round code can read/write round data.
+    // Tighten this with Firebase Auth for production apps.
+    match /rounds/{roundId} {
+      allow read, write: if true;
+    }
+  }
+}
