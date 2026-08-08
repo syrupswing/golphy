@@ -5,7 +5,6 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: $spacing-lg;
   max-width: 1200px;
   width: 100%;
   box-sizing: border-box;
@@ -22,7 +21,7 @@
 .header {
   display: flex;
   justify-content: flex-start;
-  padding: $spacing-sm;
+  padding: $spacing-md;
 
   .hole-info {
     display: flex;
@@ -179,7 +178,8 @@
     }
   }
 
-  .quick-player-panel {
+  .quick-player-panel,
+  .quick-course-panel {
     margin-top: $spacing-lg;
     padding: $spacing-md;
     background: color.adjust($light-color, $lightness: -1%);
@@ -187,7 +187,7 @@
     border: 1px solid color.adjust($light-color, $lightness: -10%);
 
     h3 {
-      margin: 0 0 $spacing-xs;
+      margin: 0 0 $spacing-sm;
       color: $dark-color;
       font-size: $font-md;
     }

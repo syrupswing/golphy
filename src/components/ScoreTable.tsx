@@ -1,5 +1,5 @@
 import React from 'react';
-import type { HoleInfo, Player, Score } from '../types/index.ts';
+import type { HoleInfo, MatchupConfig, Player, Score } from '../types/index.ts';
 import './ScoreTable.scss';
 
 interface ScoreTableProps {
@@ -7,9 +7,11 @@ interface ScoreTableProps {
   scores: Score[];
   totalHoles: number;
   parValues: number[];
+  roundTitle?: string;
   holeDetails?: HoleInfo[];
   courseName?: string;
   setLabels?: string[];
+  matchup?: MatchupConfig;
   onScoreUpdate?: (playerId: string, hole: number, strokes: number) => void;
 }
 
@@ -70,7 +72,27 @@ function OverflowFadeText({ text, className }: { text: string; className: string
   );
 }
 
-export default function ScoreTable({ players, scores, totalHoles, parValues, holeDetails, courseName, setLabels, onScoreUpdate }: ScoreTableProps) {
+function MatchChevron({ direction }: { direction: 'up' | 'down' }) {
+  return (
+    <svg
+      className="match-chevron"
+      width="11"
+      height="11"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <polyline points={direction === 'up' ? '3,10 8,5 13,10' : '3,6 8,11 13,6'} />
+    </svg>
+  );
+}
+
+export default function ScoreTable({ players, scores, totalHoles, parValues, roundTitle, holeDetails, courseName, setLabels, matchup, onScoreUpdate }: ScoreTableProps) {
   const [hasHorizontalScrollOffset, setHasHorizontalScrollOffset] = React.useState(false);
   const [playerColumnWidth, setPlayerColumnWidth] = React.useState(() => {
     try {
@@ -171,6 +193,187 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, hol
   const getScore = (playerId: string, hole: number): number | null => {
     const score = scores.find(s => s.playerId === playerId && s.hole === hole);
     return score ? score.strokes : null;
+  };
+
+  const matchPlayOpponents = React.useMemo((): Record<string, string> => {
+    if (matchup?.format !== 'match-play' || matchup.teams.length < 2) {
+      return {};
+    }
+
+    const sideA = matchup.teams[0].playerIds;
+    const sideB = matchup.teams[1].playerIds;
+    if (sideA.length === 0 || sideB.length === 0) {
+      return {};
+    }
+
+    const pairings: Record<string, string> = {};
+    sideA.forEach((playerId) => {
+      pairings[playerId] = sideB[0];
+    });
+    sideB.forEach((playerId) => {
+      pairings[playerId] = sideA[0];
+    });
+
+    return pairings;
+  }, [matchup]);
+
+  const isMatchPlay = Object.keys(matchPlayOpponents).length > 0;
+
+  // Strokes go to the higher handicap player, allocated to the hardest holes by stroke index.
+  const matchPlayStrokes = React.useMemo((): { playerId: string; byHole: Record<number, number> } | null => {
+    if (matchup?.format !== 'match-play' || matchup.teams.length < 2) {
+      return null;
+    }
+
+    const playerAId = matchup.teams[0].playerIds[0];
+    const playerBId = matchup.teams[1].playerIds[0];
+    const handicapA = players.find((player) => player.id === playerAId)?.handicap;
+    const handicapB = players.find((player) => player.id === playerBId)?.handicap;
+
+    if (!Number.isFinite(handicapA) || !Number.isFinite(handicapB)) {
+      return null;
+    }
+
+    const difference = Math.round(Math.abs((handicapA as number) - (handicapB as number)));
+    if (difference <= 0) {
+      return null;
+    }
+
+    const rankedHoles = Array.from({ length: totalHoles }, (_, index) => ({
+      hole: index + 1,
+      strokeIndex: holeDetails?.[index]?.handicap,
+    })).filter((entry): entry is { hole: number; strokeIndex: number } =>
+      Number.isFinite(entry.strokeIndex)
+    );
+
+    if (rankedHoles.length === 0) {
+      return null;
+    }
+
+    const base = Math.floor(difference / rankedHoles.length);
+    const remainder = difference % rankedHoles.length;
+    const byHole: Record<number, number> = {};
+
+    rankedHoles.forEach(({ hole, strokeIndex }) => {
+      const strokes = base + (strokeIndex <= remainder ? 1 : 0);
+      if (strokes > 0) {
+        byHole[hole] = strokes;
+      }
+    });
+
+    return {
+      playerId: (handicapA as number) > (handicapB as number) ? playerAId : playerBId,
+      byHole,
+    };
+  }, [matchup, players, holeDetails, totalHoles]);
+
+  const getStrokesGiven = (playerId: string, hole: number): number =>
+    matchPlayStrokes?.playerId === playerId ? matchPlayStrokes.byHole[hole] ?? 0 : 0;
+
+  const getNetScore = (playerId: string, hole: number): number | null => {
+    const gross = getScore(playerId, hole);
+    return gross ? gross - getStrokesGiven(playerId, hole) : null;
+  };
+
+  const matchPlaySides = React.useMemo(() => {
+    if (matchup?.format !== 'match-play' || matchup.teams.length < 2) {
+      return null;
+    }
+
+    const topId = matchup.teams[0].playerIds[0];
+    const bottomId = matchup.teams[1].playerIds[0];
+    if (!topId || !bottomId) {
+      return null;
+    }
+
+    return { topId, bottomId, splitAfterId: matchup.teams[0].playerIds.at(-1) ?? topId };
+  }, [matchup]);
+
+  const isHoleComplete = (hole: number): boolean =>
+    Boolean(
+      matchPlaySides &&
+        getScore(matchPlaySides.topId, hole) &&
+        getScore(matchPlaySides.bottomId, hole)
+    );
+
+  // Positive means the player above the match row is up.
+  const getMatchDeltaThroughHole = (hole: number): number | null => {
+    if (!matchPlaySides) {
+      return null;
+    }
+
+    let delta = 0;
+    let holesCounted = 0;
+
+    for (let played = 1; played <= hole; played += 1) {
+      const top = getNetScore(matchPlaySides.topId, played);
+      const bottom = getNetScore(matchPlaySides.bottomId, played);
+      if (top === null || bottom === null) {
+        continue;
+      }
+
+      holesCounted += 1;
+      if (top < bottom) delta += 1;
+      else if (bottom < top) delta -= 1;
+    }
+
+    return holesCounted > 0 ? delta : null;
+  };
+
+  const renderMatchStatus = (hole: number, throughLatest = false) => {
+    if (!throughLatest && !isHoleComplete(hole)) {
+      return null;
+    }
+
+    const delta = getMatchDeltaThroughHole(hole);
+    if (delta === null) {
+      return null;
+    }
+
+    if (delta === 0) {
+      return <span className="match-status">AS</span>;
+    }
+
+    return (
+      <span className={`match-status ${delta > 0 ? 'is-up' : 'is-down'}`}>
+        <MatchChevron direction={delta > 0 ? 'up' : 'down'} />
+        {Math.abs(delta)}
+      </span>
+    );
+  };
+
+  const renderMatchScoreRow = () => (
+    <tr className="match-score-row">
+      <td className="label-cell">
+        <OverflowFadeText text="Match" className="label-text" />
+      </td>
+      {holeGroups.map((group) => (
+        <React.Fragment key={`match-${group.label}`}>
+          {group.holes.map((hole) => (
+            <td key={hole} className="match-cell">{renderMatchStatus(hole)}</td>
+          ))}
+          <td className="total-cell">{renderMatchStatus(group.end, true)}</td>
+        </React.Fragment>
+      ))}
+      <td className="total-cell">{renderMatchStatus(totalHoles, true)}</td>
+    </tr>
+  );
+
+  const getMatchPlayOutcome = (playerId: string, hole: number): 'won' | 'lost' | 'halved' | null => {
+    const opponentId = matchPlayOpponents[playerId];
+    if (!opponentId) {
+      return null;
+    }
+
+    const ownStrokes = getNetScore(playerId, hole);
+    const opponentStrokes = getNetScore(opponentId, hole);
+    if (ownStrokes === null || opponentStrokes === null) {
+      return null;
+    }
+
+    if (ownStrokes < opponentStrokes) return 'won';
+    if (ownStrokes > opponentStrokes) return 'lost';
+    return 'halved';
   };
 
   const getHoleScore = (playerId: string, hole: number): number => {
@@ -296,29 +499,58 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, hol
   const renderHoleCell = (playerId: string, playerName: string, hole: number, par: number) => {
     const score = getScore(playerId, hole);
     const displayScore = score || '';
+    const matchPlayOutcome = isMatchPlay ? getMatchPlayOutcome(playerId, hole) : null;
 
     let className = 'score-cell';
     if (score === null) {
       className += ' empty';
-    } else if (score === par - 2 || score < par - 2) {
-      className += ' eagle';
-    } else if (score === par - 1) {
-      className += ' birdie';
-    } else if (score === par) {
-      className += ' par';
-    } else if (score === par + 1) {
-      className += ' bogey';
-    } else if (score > par + 1) {
-      className += ' double-bogey';
     }
+
+    if (isMatchPlay) {
+      className += ' match-play';
+      if (matchPlayOutcome) {
+        className += ` hole-${matchPlayOutcome}`;
+      }
+    } else if (score !== null) {
+      if (score <= par - 2) {
+        className += ' eagle';
+      } else if (score === par - 1) {
+        className += ' birdie';
+      } else if (score === par) {
+        className += ' par';
+      } else if (score === par + 1) {
+        className += ' bogey';
+      } else {
+        className += ' double-bogey';
+      }
+    }
+
+    const outcomeLabel =
+      matchPlayOutcome === 'won'
+        ? ', hole won'
+        : matchPlayOutcome === 'lost'
+          ? ', hole lost'
+          : matchPlayOutcome === 'halved'
+            ? ', hole halved'
+            : '';
+
+    const strokesGiven = isMatchPlay ? getStrokesGiven(playerId, hole) : 0;
+    const strokesLabel = strokesGiven > 0 ? `, ${strokesGiven} stroke${strokesGiven > 1 ? 's' : ''} given` : '';
 
     return (
       <td className={className}>
+        {strokesGiven > 0 && (
+          <span className="stroke-dots" aria-hidden="true">
+            {Array.from({ length: strokesGiven }, (_, index) => (
+              <span key={index} className="stroke-dot" />
+            ))}
+          </span>
+        )}
         <button
           type="button"
           className="score-entry-btn"
           onClick={() => openScoreDialog(playerId, playerName, hole, par)}
-          aria-label={`${playerName}, hole ${hole}, ${score ?? 'no score'}, par ${par}`}
+          aria-label={`${playerName}, hole ${hole}, ${score ?? 'no score'}, par ${par}${outcomeLabel}${strokesLabel}`}
         >
           <span className="score-text">{displayScore}</span>
         </button>
@@ -328,7 +560,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, hol
 
   return (
     <div className="score-table-container">
-      {courseName && <h2 className="course-name-heading">{courseName}</h2>}
+      {roundTitle && <h2 className="course-name-heading">{roundTitle}</h2>}
       <div
         className={`table-wrapper${hasHorizontalScrollOffset ? ' is-scrolled-x' : ''}${isResizingPlayerColumn ? ' is-resizing-col' : ''}`}
         onScroll={handleTableScroll}
@@ -359,7 +591,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, hol
             <tr>
               <th className="player-header">
                 <div className="player-header-content">
-                  <OverflowFadeText text="PLAYER" className="player-header-label" />
+                  <OverflowFadeText text="HOLE" className="player-header-label" />
                   <button
                     type="button"
                     className="player-column-resizer"
@@ -440,10 +672,16 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, hol
               </tr>
             )}
             {players.map(player => (
-              <tr key={player.id} className="player-row">
+              <React.Fragment key={player.id}>
+              <tr className="player-row">
                 <td className="player-cell">
                   <div className="player-info">
                     <OverflowFadeText text={player.name} className="player-name" />
+                    {Number.isFinite(player.handicap) && (
+                      <span className="player-handicap" title={`Handicap ${player.handicap}`}>
+                        {player.handicap}
+                      </span>
+                    )}
                   </div>
                 </td>
                 {holeGroups.map((group) => (
@@ -460,6 +698,8 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, hol
                 ))}
                 <td className="total-cell bold"><span className="score-text">{getTotalScore(player.id) || ''}</span></td>
               </tr>
+              {matchPlaySides?.splitAfterId === player.id && renderMatchScoreRow()}
+              </React.Fragment>
             ))}
           </tbody>
         </table>

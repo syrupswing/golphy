@@ -7,7 +7,10 @@ interface ScorecardSelectorProps {
   selectedId: string | null;
   onSelect: (scorecard: Scorecard | null) => void;
   onCreate: (name: string, sets: NineHoleSet[]) => Promise<void>;
-  isCreating: boolean;
+  onUpdate: (id: string, name: string, sets: NineHoleSet[]) => Promise<void>;
+  isSaving: boolean;
+  showOptions?: boolean;
+  initialFormMode?: 'closed' | 'create';
 }
 
 const DEFAULT_PAR = 4;
@@ -33,17 +36,67 @@ export default function ScorecardSelector({
   selectedId,
   onSelect,
   onCreate,
-  isCreating,
+  onUpdate,
+  isSaving,
+  showOptions = true,
+  initialFormMode = 'closed',
 }: ScorecardSelectorProps) {
-  const [showForm, setShowForm] = useState(false);
+  const [formMode, setFormMode] = useState<'closed' | 'create' | 'edit'>(initialFormMode);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [totalHoles, setTotalHoles] = useState<9 | 18 | 27>(18);
   const [sets, setSets] = useState<NineHoleSet[]>(makeDefaultSets(18));
   const [createError, setCreateError] = useState('');
 
+  const selectedScorecard = scorecards.find((sc) => sc.id === selectedId) ?? null;
+
+  const closeForm = () => {
+    setFormMode('closed');
+    setEditingId(null);
+    setNewName('');
+    setTotalHoles(18);
+    setSets(makeDefaultSets(18));
+    setCreateError('');
+  };
+
+  const openCreateForm = () => {
+    if (formMode === 'create') {
+      closeForm();
+      return;
+    }
+    setFormMode('create');
+    setEditingId(null);
+    setNewName('');
+    setTotalHoles(18);
+    setSets(makeDefaultSets(18));
+    setCreateError('');
+  };
+
+  const openEditForm = () => {
+    if (!selectedScorecard) return;
+    if (formMode === 'edit' && editingId === selectedScorecard.id) {
+      closeForm();
+      return;
+    }
+    setFormMode('edit');
+    setEditingId(selectedScorecard.id);
+    setNewName(selectedScorecard.name);
+    setTotalHoles((selectedScorecard.sets.length * 9) as 9 | 18 | 27);
+    setSets(
+      selectedScorecard.sets.map((set) => ({
+        alias: set.alias,
+        holes: set.holes.map((hole) => ({ ...hole })),
+      }))
+    );
+    setCreateError('');
+  };
+
   const handleHoleCountChange = (count: 9 | 18 | 27) => {
     setTotalHoles(count);
-    setSets(makeDefaultSets(count));
+    setSets((prev) => {
+      const defaults = makeDefaultSets(count);
+      return defaults.map((fallback, index) => prev[index] ?? fallback);
+    });
   };
 
   const handleAliasChange = (setIndex: number, value: string) => {
@@ -74,51 +127,62 @@ export default function ScorecardSelector({
     );
   };
 
-  const handleCreate = async () => {
+  const handleSave = async () => {
     if (!newName.trim()) {
       setCreateError('Enter a course name.');
       return;
     }
     setCreateError('');
-    await onCreate(newName.trim(), sets);
-    setNewName('');
-    setTotalHoles(18);
-    setSets(makeDefaultSets(18));
-    setShowForm(false);
+
+    if (formMode === 'edit' && editingId) {
+      await onUpdate(editingId, newName.trim(), sets);
+    } else {
+      await onCreate(newName.trim(), sets);
+    }
+
+    closeForm();
   };
 
   return (
     <div className="scorecard-selector">
-      <div className="scorecard-options">
-        <button
-          type="button"
-          className={`scorecard-option ${selectedId === null ? 'selected' : ''}`}
-          onClick={() => onSelect(null)}
-        >
-          No saved course
-          <span className="scorecard-holes">Use default par values</span>
-        </button>
-        {scorecards.map((sc) => (
+      {showOptions && (
+        <div className="scorecard-options">
           <button
-            key={sc.id}
             type="button"
-            className={`scorecard-option ${selectedId === sc.id ? 'selected' : ''}`}
-            onClick={() => onSelect(sc)}
+            className={`scorecard-option ${selectedId === null ? 'selected' : ''}`}
+            onClick={() => onSelect(null)}
           >
-            {sc.name}
-            <span className="scorecard-holes">{sc.sets.length * 9} holes</span>
+            No saved course
+            <span className="scorecard-holes">Use default par values</span>
           </button>
-        ))}
-        <button
-          type="button"
-          className={`scorecard-option add-new ${showForm ? 'selected' : ''}`}
-          onClick={() => setShowForm((v) => !v)}
-        >
-          + Add new course
-        </button>
-      </div>
+          {scorecards.map((sc) => (
+            <button
+              key={sc.id}
+              type="button"
+              className={`scorecard-option ${selectedId === sc.id ? 'selected' : ''}`}
+              onClick={() => onSelect(sc)}
+            >
+              {sc.name}
+              <span className="scorecard-holes">{sc.sets.length * 9} holes</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`scorecard-option add-new ${formMode === 'create' ? 'selected' : ''}`}
+            onClick={openCreateForm}
+          >
+            + Add new course
+          </button>
+        </div>
+      )}
 
-      {showForm && (
+      {showOptions && selectedScorecard && (
+        <button type="button" className="edit-course-btn" onClick={openEditForm}>
+          {formMode === 'edit' ? 'Cancel editing' : `Edit ${selectedScorecard.name}`}
+        </button>
+      )}
+
+      {formMode !== 'closed' && (
         <div className="scorecard-form">
           <input
             type="text"
@@ -232,10 +296,10 @@ export default function ScorecardSelector({
           <button
             type="button"
             className="create-btn"
-            onClick={handleCreate}
-            disabled={isCreating}
+            onClick={handleSave}
+            disabled={isSaving}
           >
-            {isCreating ? 'Saving...' : 'Save course'}
+            {isSaving ? 'Saving...' : formMode === 'edit' ? 'Save changes' : 'Save course'}
           </button>
         </div>
       )}

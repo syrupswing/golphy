@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Player, PlayerProfile, Score, GameState, Scorecard } from './types/index.ts'
+import type { Player, PlayerProfile, Score, GameState, Scorecard, NineHoleSet } from './types/index.ts'
 import ScoreTable from './components/ScoreTable'
 import ScorecardSelector from './components/ScorecardSelector'
 import { isFirebaseConfigured } from './firebase/config'
@@ -11,7 +11,7 @@ import {
   subscribeToRound,
   updateRound,
 } from './firebase/rounds'
-import { createScorecard, listScorecards } from './firebase/scorecards'
+import { createScorecard, listScorecards, updateScorecard } from './firebase/scorecards'
 import { createPlayer, deletePlayer, listPlayers, updatePlayer } from './firebase/players'
 import './styles/App.scss'
 import golphyBanner from './assets/Golphy-banner.svg'
@@ -102,6 +102,8 @@ function App() {
   const [scorecards, setScorecards] = useState<Scorecard[]>([]);
   const [selectedScorecard, setSelectedScorecard] = useState<Scorecard | null>(null);
   const [isCreatingScorecard, setIsCreatingScorecard] = useState(false);
+  const [coursePanelMode, setCoursePanelMode] = useState<'closed' | 'add' | 'edit'>('closed');
+  const [homeCourseSelection, setHomeCourseSelection] = useState<Scorecard | null>(null);
   const [showRoundInfoPopover, setShowRoundInfoPopover] = useState(false);
   const [availableRounds, setAvailableRounds] = useState<Array<{
     id: string;
@@ -446,7 +448,7 @@ function App() {
     });
   };
 
-  const addRoundPlayer = (id: string, name: string) => {
+  const addRoundPlayer = (id: string, name: string, handicap?: number) => {
     if (!name.trim() || gameState.players.length >= 8) {
       return;
     }
@@ -460,6 +462,8 @@ function App() {
       id,
       name: name.trim(),
       color: PLAYER_COLORS[gameState.players.length],
+      // Firestore rejects undefined values, so only set a numeric handicap.
+      ...(Number.isFinite(handicap) ? { handicap: handicap as number } : {}),
     };
 
     updateGameState((prev) => ({
@@ -514,7 +518,7 @@ function App() {
 
       if (addToRound) {
         const roundName = created.nickname?.trim() || `${created.firstName} ${created.lastName}`;
-        addRoundPlayer(created.id, roundName);
+        addRoundPlayer(created.id, roundName, created.handicap);
         setShowRoundPlayerForm(false);
         setShowRoundNewPlayerForm(false);
       } else {
@@ -569,7 +573,7 @@ function App() {
       return;
     }
 
-    addRoundPlayer(profile.id, getRoundPlayerDisplayName(profile));
+    addRoundPlayer(profile.id, getRoundPlayerDisplayName(profile), profile.handicap);
     setShowRoundPlayerForm(false);
     setShowRoundNewPlayerForm(false);
   };
@@ -779,13 +783,36 @@ function App() {
     }
   };
 
-  const handleCreateScorecard = async (name: string, sets: import('./types/index.ts').NineHoleSet[]) => {
+  const handleCreateScorecard = async (name: string, sets: NineHoleSet[]) => {
     setIsCreatingScorecard(true);
     try {
       const created = await createScorecard(name, sets, clientId);
       setScorecards((prev) => [...prev, created]);
       setSelectedScorecard(created);
       setTotalHoles(created.sets.length * 9);
+      setCoursePanelMode('closed');
+    } finally {
+      setIsCreatingScorecard(false);
+    }
+  };
+
+  const handleUpdateScorecard = async (id: string, name: string, sets: NineHoleSet[]) => {
+    setIsCreatingScorecard(true);
+    try {
+      const savedSets = await updateScorecard(id, name, sets);
+      setScorecards((prev) =>
+        prev.map((sc) => (sc.id === id ? { ...sc, name: name.trim(), sets: savedSets } : sc))
+      );
+      setSelectedScorecard((prev) =>
+        prev?.id === id ? { ...prev, name: name.trim(), sets: savedSets } : prev
+      );
+      setHomeCourseSelection((prev) =>
+        prev?.id === id ? { ...prev, name: name.trim(), sets: savedSets } : prev
+      );
+      if (selectedScorecard?.id === id) {
+        setTotalHoles(savedSets.length * 9);
+      }
+      setCoursePanelMode('closed');
     } finally {
       setIsCreatingScorecard(false);
     }
@@ -1238,8 +1265,7 @@ function App() {
               </div>
 
               <div className="quick-player-panel">
-                <h3>Add a new player</h3>
-                <p className="quick-player-copy">Create a player profile now and keep the unique player ID for future edits.</p>
+                <h3>Players</h3>
                 {!showQuickPlayerForm && !showQuickEditPlayerForm ? (
                   <div className="player-action-row">
                     <button
@@ -1247,7 +1273,7 @@ function App() {
                       className="reveal-player-btn"
                       onClick={() => setShowQuickPlayerForm(true)}
                     >
-                      Add a new player
+                      Add new
                     </button>
                     <button
                       type="button"
@@ -1257,7 +1283,7 @@ function App() {
                         void refreshPlayerProfiles()
                       }}
                     >
-                      Edit existing player
+                      Edit existing
                     </button>
                   </div>
                 ) : (
@@ -1341,6 +1367,48 @@ function App() {
                   </div>
                 )}
               </div>
+
+              <div className="quick-course-panel">
+                <h3>Courses</h3>
+                {coursePanelMode === 'closed' ? (
+                  <div className="player-action-row">
+                    <button
+                      type="button"
+                      className="reveal-player-btn"
+                      onClick={() => setCoursePanelMode('add')}
+                    >
+                      Add new
+                    </button>
+                    <button
+                      type="button"
+                      className="reveal-player-btn secondary"
+                      onClick={() => setCoursePanelMode('edit')}
+                    >
+                      Edit existing
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <ScorecardSelector
+                      scorecards={scorecards}
+                      selectedId={homeCourseSelection?.id ?? null}
+                      onSelect={setHomeCourseSelection}
+                      onCreate={handleCreateScorecard}
+                      onUpdate={handleUpdateScorecard}
+                      isSaving={isCreatingScorecard}
+                      showOptions={coursePanelMode === 'edit'}
+                      initialFormMode={coursePanelMode === 'add' ? 'create' : 'closed'}
+                    />
+                    <button
+                      type="button"
+                      className="collapse-player-btn"
+                      onClick={() => setCoursePanelMode('closed')}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </div>
             </>
           )}
 
@@ -1406,7 +1474,8 @@ function App() {
                   selectedId={selectedScorecard?.id ?? null}
                   onSelect={handleScorecardSelect}
                   onCreate={handleCreateScorecard}
-                  isCreating={isCreatingScorecard}
+                  onUpdate={handleUpdateScorecard}
+                  isSaving={isCreatingScorecard}
                 />
               </div>
 
@@ -1908,9 +1977,11 @@ function App() {
         scores={gameState.scores}
         totalHoles={gameState.totalHoles}
         parValues={gameState.parValues ?? buildDefaultPars(gameState.totalHoles)}
+        roundTitle={roundTitle}
         holeDetails={gameState.holeDetails}
-        courseName={roundTitle}
+        courseName={gameState.scorecardName}
         setLabels={gameState.playedSetLabels}
+        matchup={gameState.matchup}
         onScoreUpdate={updateScore}
       />
     </div>

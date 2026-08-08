@@ -46,6 +46,23 @@
   }
 }
 
+.edit-course-btn {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: $spacing-sm $spacing-md;
+  border-radius: $border-radius-sm;
+  background: $white;
+  border: 1px solid color.adjust($light-color, $lightness: -12%);
+  color: $dark-color;
+  font-size: $font-sm;
+  font-weight: 600;
+  text-align: left;
+
+  &:hover {
+    background: color.adjust($light-color, $lightness: 2%);
+  }
+}
+
 .scorecard-form {
   display: flex;
   flex-direction: column;
