@@ -7,6 +7,7 @@ import {
   createRound,
   loadRound,
   normalizeRoundId,
+  listRounds,
   subscribeToRound,
   updateRound,
 } from './firebase/rounds'
@@ -23,6 +24,27 @@ const PLAYER_COLORS = [
 const DEFAULT_PAR = 4;
 
 const DEFAULT_HOLE_OPTIONS = [9, 18, 27] as const;
+const APP_SESSION_STORAGE_KEY = 'golphy-app-session-v1';
+const DEFAULT_GAME_STATE: GameState = {
+  players: [],
+  scores: [],
+  currentHole: 1,
+  totalHoles: 18,
+};
+
+interface PersistedAppSession {
+  view: 'home' | 'game';
+  homeStep: 'choose' | 'new' | 'join';
+  newRoundStep: 'course' | 'details';
+  competitionType: 'stroke' | 'match-play';
+  gameStarted: boolean;
+  gameState: GameState;
+  totalHoles: number;
+  roundAlias: string;
+  sharedRoundId: string | null;
+  selectedJoinRoundId: string;
+  selectedScorecard: Scorecard | null;
+}
 
 const createClientId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -46,12 +68,7 @@ function App() {
   const [newRoundStep, setNewRoundStep] = useState<'course' | 'details'>('course');
   const [competitionType, setCompetitionType] = useState<'stroke' | 'match-play'>('stroke');
   const [gameStarted, setGameStarted] = useState(false);
-  const [gameState, setGameState] = useState<GameState>({
-    players: [],
-    scores: [],
-    currentHole: 1,
-    totalHoles: 18
-  });
+  const [gameState, setGameState] = useState<GameState>(DEFAULT_GAME_STATE);
   const [newPlayerFirstName, setNewPlayerFirstName] = useState('');
   const [newPlayerLastName, setNewPlayerLastName] = useState('');
   const [newPlayerNickname, setNewPlayerNickname] = useState('');
@@ -59,6 +76,7 @@ function App() {
   const [showQuickPlayerForm, setShowQuickPlayerForm] = useState(false);
   const [showQuickEditPlayerForm, setShowQuickEditPlayerForm] = useState(false);
   const [showRoundPlayerForm, setShowRoundPlayerForm] = useState(false);
+  const [showRoundNewPlayerForm, setShowRoundNewPlayerForm] = useState(false);
   const [showEditPlayerForm, setShowEditPlayerForm] = useState(false);
   const [playerProfiles, setPlayerProfiles] = useState<PlayerProfile[]>([]);
   const [isLoadingPlayerProfiles, setIsLoadingPlayerProfiles] = useState(false);
@@ -76,7 +94,6 @@ function App() {
   const [isUpdatingPlayer, setIsUpdatingPlayer] = useState(false);
   const [isDeletingPlayer, setIsDeletingPlayer] = useState(false);
   const [totalHoles, setTotalHoles] = useState(18);
-  const [roundCodeInput, setRoundCodeInput] = useState('');
   const [roundAlias, setRoundAlias] = useState('');
   const [sharedRoundId, setSharedRoundId] = useState<string | null>(null);
   const [isConnectingRound, setIsConnectingRound] = useState(false);
@@ -86,6 +103,15 @@ function App() {
   const [selectedScorecard, setSelectedScorecard] = useState<Scorecard | null>(null);
   const [isCreatingScorecard, setIsCreatingScorecard] = useState(false);
   const [showRoundInfoPopover, setShowRoundInfoPopover] = useState(false);
+  const [availableRounds, setAvailableRounds] = useState<Array<{
+    id: string;
+    alias?: string;
+    scorecardName?: string;
+    totalHoles: number;
+  }>>([]);
+  const [isLoadingRounds, setIsLoadingRounds] = useState(false);
+  const [selectedJoinRoundId, setSelectedJoinRoundId] = useState('');
+  const [isSessionRestored, setIsSessionRestored] = useState(false);
   const clientId = useMemo(() => createClientId(), []);
   const skipNextSyncRef = useRef(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -98,6 +124,66 @@ function App() {
   useEffect(() => {
     if (!isFirebaseConfigured) return;
     listScorecards().then(setScorecards).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    try {
+      const rawSession = window.localStorage.getItem(APP_SESSION_STORAGE_KEY);
+      if (!rawSession) {
+        setIsSessionRestored(true);
+        return;
+      }
+
+      const session = JSON.parse(rawSession) as Partial<PersistedAppSession>;
+
+      if (session.gameState) {
+        setGameState(session.gameState);
+      }
+
+      if (session.view === 'home' || session.view === 'game') {
+        setView(session.view);
+      }
+
+      if (session.homeStep === 'choose' || session.homeStep === 'new' || session.homeStep === 'join') {
+        setHomeStep(session.homeStep);
+      }
+
+      if (session.newRoundStep === 'course' || session.newRoundStep === 'details') {
+        setNewRoundStep(session.newRoundStep);
+      }
+
+      if (session.competitionType === 'stroke' || session.competitionType === 'match-play') {
+        setCompetitionType(session.competitionType);
+      }
+
+      if (typeof session.gameStarted === 'boolean') {
+        setGameStarted(session.gameStarted);
+      }
+
+      if (typeof session.totalHoles === 'number' && session.totalHoles > 0) {
+        setTotalHoles(session.totalHoles);
+      }
+
+      if (typeof session.roundAlias === 'string') {
+        setRoundAlias(session.roundAlias);
+      }
+
+      if (typeof session.sharedRoundId === 'string' || session.sharedRoundId === null) {
+        setSharedRoundId(session.sharedRoundId ?? null);
+      }
+
+      if (typeof session.selectedJoinRoundId === 'string') {
+        setSelectedJoinRoundId(session.selectedJoinRoundId);
+      }
+
+      if (session.selectedScorecard) {
+        setSelectedScorecard(session.selectedScorecard);
+      }
+    } catch {
+      window.localStorage.removeItem(APP_SESSION_STORAGE_KEY);
+    } finally {
+      setIsSessionRestored(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -167,6 +253,40 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (homeStep !== 'join') {
+      setAvailableRounds([]);
+      setIsLoadingRounds(false);
+      setSelectedJoinRoundId('');
+      return;
+    }
+
+    if (!isFirebaseConfigured) {
+      setAvailableRounds([]);
+      setIsLoadingRounds(false);
+      return;
+    }
+
+    const loadAvailableRounds = async () => {
+      setIsLoadingRounds(true);
+      try {
+        const rounds = await listRounds();
+        setAvailableRounds(rounds);
+        setSelectedJoinRoundId((current) =>
+          current && rounds.some((round) => round.id === current) ? current : rounds[0]?.id ?? ''
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load rounds.';
+        setSyncError(message);
+        setAvailableRounds([]);
+      } finally {
+        setIsLoadingRounds(false);
+      }
+    };
+
+    void loadAvailableRounds();
+  }, [homeStep]);
+
+  useEffect(() => {
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
@@ -196,6 +316,49 @@ function App() {
 
     void runSync();
   }, [clientId, gameStarted, gameState, sharedRoundId]);
+
+  useEffect(() => {
+    if (!isSessionRestored || !isFirebaseConfigured || !sharedRoundId || !gameStarted) {
+      return;
+    }
+
+    subscribeToSharedRound(sharedRoundId);
+  }, [gameStarted, isSessionRestored, sharedRoundId]);
+
+  useEffect(() => {
+    if (!isSessionRestored) {
+      return;
+    }
+
+    const sessionToPersist: PersistedAppSession = {
+      view,
+      homeStep,
+      newRoundStep,
+      competitionType,
+      gameStarted,
+      gameState,
+      totalHoles,
+      roundAlias,
+      sharedRoundId,
+      selectedJoinRoundId,
+      selectedScorecard,
+    };
+
+    window.localStorage.setItem(APP_SESSION_STORAGE_KEY, JSON.stringify(sessionToPersist));
+  }, [
+    competitionType,
+    gameStarted,
+    gameState,
+    homeStep,
+    isSessionRestored,
+    newRoundStep,
+    roundAlias,
+    selectedJoinRoundId,
+    selectedScorecard,
+    sharedRoundId,
+    totalHoles,
+    view,
+  ]);
 
   const subscribeToSharedRound = (roundId: string) => {
     if (unsubscribeRef.current) {
@@ -302,6 +465,7 @@ function App() {
     updateGameState((prev) => ({
       ...prev,
       players: [...prev.players, newPlayer],
+      matchup: buildMatchupConfig([...prev.players, newPlayer]),
     }));
     setPlayerProfileError('');
   };
@@ -352,6 +516,7 @@ function App() {
         const roundName = created.nickname?.trim() || `${created.firstName} ${created.lastName}`;
         addRoundPlayer(created.id, roundName);
         setShowRoundPlayerForm(false);
+        setShowRoundNewPlayerForm(false);
       } else {
         setShowQuickPlayerForm(false);
       }
@@ -381,6 +546,32 @@ function App() {
 
   const handleCreatePlayerOnly = async () => {
     await createPlayerProfile(false);
+  };
+
+  const getRoundPlayerDisplayName = (profile: PlayerProfile) =>
+    profile.nickname?.trim() || `${profile.firstName} ${profile.lastName}`;
+
+  const openRoundPlayerPicker = () => {
+    setShowRoundPlayerForm(true);
+    setShowRoundNewPlayerForm(false);
+    setPlayerProfileError('');
+    void refreshPlayerProfiles();
+  };
+
+  const closeRoundPlayerPicker = () => {
+    setShowRoundPlayerForm(false);
+    setShowRoundNewPlayerForm(false);
+  };
+
+  const addExistingPlayerToRound = (profile: PlayerProfile) => {
+    if (gameState.players.some((player) => player.id === profile.id)) {
+      setPlayerProfileError('That player is already in this round.');
+      return;
+    }
+
+    addRoundPlayer(profile.id, getRoundPlayerDisplayName(profile));
+    setShowRoundPlayerForm(false);
+    setShowRoundNewPlayerForm(false);
   };
 
   const openPlayerForEditing = (profile: PlayerProfile) => {
@@ -558,11 +749,27 @@ function App() {
     }
   };
 
-  const removePlayer = (playerId: string) => {
-    updateGameState(prev => ({
-      ...prev,
-      players: prev.players.filter(p => p.id !== playerId)
-    }));
+  const removePlayer = (playerId: string): boolean => {
+    const confirmed = window.confirm(
+      'Are you absolutely sure? Removing this player from the round will delete all scores recorded for them in this round.'
+    );
+
+    if (!confirmed) {
+      return false;
+    }
+
+    updateGameState((prev) => {
+      const nextPlayers = prev.players.filter((player) => player.id !== playerId);
+
+      return {
+        ...prev,
+        players: nextPlayers,
+        scores: prev.scores.filter((score) => score.playerId !== playerId),
+        matchup: buildMatchupConfig(nextPlayers),
+      };
+    });
+
+    return true;
   };
 
   const handleScorecardSelect = (sc: Scorecard | null) => {
@@ -584,6 +791,27 @@ function App() {
     }
   };
 
+  const buildInitialRoundState = (): GameState => {
+    const holeDetails = selectedScorecard?.sets.flatMap((set) => set.holes);
+    const parValues = holeDetails?.map((hole) => hole.par);
+
+    return {
+      ...gameState,
+      currentHole: 1,
+      totalHoles,
+      alias: roundAlias.trim() || undefined,
+      parValues: parValues && parValues.length > 0 ? parValues : buildDefaultPars(totalHoles),
+      holeDetails:
+        holeDetails && holeDetails.length > 0
+          ? holeDetails
+          : buildDefaultPars(totalHoles).map((par) => ({ par })),
+      scorecardId: selectedScorecard?.id,
+      scorecardName: selectedScorecard?.name,
+      playedSetLabels: buildPlayedSetLabels(),
+      matchup: buildMatchupConfig(gameState.players),
+    };
+  };
+
   const startGame = () => {
     if (gameState.players.length > 0) {
       if (isMatchPlay && gameState.players.length !== 2) {
@@ -591,26 +819,40 @@ function App() {
         return;
       }
 
-      const parValues = selectedScorecard?.sets.flatMap((s) => s.holes.map((h) => h.par));
-      updateGameState(prev => ({
-        ...prev,
-        totalHoles,
-        parValues: parValues && parValues.length > 0 ? parValues : buildDefaultPars(totalHoles),
-        scorecardId: selectedScorecard?.id,
-        scorecardName: selectedScorecard?.name,
-        playedSetLabels: buildPlayedSetLabels(),
-        matchup: buildMatchupConfig(prev.players),
-      }));
+      const initialState = buildInitialRoundState();
+      setGameState(initialState);
       setGameStarted(true);
       setView('game');
       setHomeStep('choose');
       setPlayerProfileError('');
+
+      if (isFirebaseConfigured && !sharedRoundId) {
+        setIsConnectingRound(true);
+        setSyncError('');
+
+        void (async () => {
+          try {
+            const roundId = await createRound(initialState, clientId);
+            skipNextSyncRef.current = true;
+            setSharedRoundId(roundId);
+            subscribeToSharedRound(roundId);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to save round.';
+            setSyncError(`Round started locally, but could not be saved for joining: ${message}`);
+          } finally {
+            setIsConnectingRound(false);
+          }
+        })();
+      }
     }
   };
 
   const goHome = () => {
     setView('home');
     setShowRoundInfoPopover(false);
+    setShowRoundPlayerForm(false);
+    setShowRoundNewPlayerForm(false);
+    setShowEditPlayerForm(false);
     setHomeStep('choose');
     setNewRoundStep('course');
     setCompetitionType('stroke');
@@ -630,7 +872,6 @@ function App() {
     setGameStarted(false);
     setSharedRoundId(null);
     setRoundAlias('');
-    setRoundCodeInput('');
     setSyncError('');
     setShareNotice('');
     setSelectedScorecard(null);
@@ -640,6 +881,7 @@ function App() {
     setShowQuickPlayerForm(false);
     setShowQuickEditPlayerForm(false);
     setShowRoundPlayerForm(false);
+    setShowRoundNewPlayerForm(false);
     setShowEditPlayerForm(false);
     setNewPlayerFirstName('');
     setNewPlayerLastName('');
@@ -650,7 +892,7 @@ function App() {
     setEditLastName('');
     setEditNickname('');
     setEditHandicap('');
-    setGameState({ players: [], scores: [], currentHole: 1, totalHoles: 18 });
+    setGameState(DEFAULT_GAME_STATE);
     setTotalHoles(18);
     setHomeStep('choose');
     setNewRoundStep('course');
@@ -673,19 +915,7 @@ function App() {
     setSyncError('');
 
     try {
-      const initialState: GameState = {
-        ...gameState,
-        currentHole: 1,
-        totalHoles,
-        alias: roundAlias.trim() || undefined,
-        parValues:
-          selectedScorecard?.sets.flatMap((s) => s.holes.map((h) => h.par)) ??
-          buildDefaultPars(totalHoles),
-        scorecardId: selectedScorecard?.id,
-        scorecardName: selectedScorecard?.name,
-        playedSetLabels: buildPlayedSetLabels(),
-        matchup: buildMatchupConfig(gameState.players),
-      };
+      const initialState = buildInitialRoundState();
 
       if (competitionType === 'match-play' && gameState.players.length !== 2) {
         setSyncError('1-on-1 match play requires exactly 2 players before creating a shared round.');
@@ -696,7 +926,6 @@ function App() {
       const roundId = await createRound(initialState, clientId);
       skipNextSyncRef.current = true;
       setSharedRoundId(roundId);
-      setRoundCodeInput(roundId);
       setShareNotice(`Shared round created. Code: ${roundId}`);
       setRoundAlias(initialState.alias ?? '');
       setGameState(initialState);
@@ -719,9 +948,9 @@ function App() {
       return;
     }
 
-    const normalizedRoundId = normalizeRoundId(roundCodeInput);
+    const normalizedRoundId = normalizeRoundId(selectedJoinRoundId);
     if (!normalizedRoundId) {
-      setSyncError('Enter a valid round code to join a shared round.');
+      setSyncError('Choose a round to join.');
       return;
     }
 
@@ -803,9 +1032,7 @@ function App() {
     setHomeStep(step);
     setSyncError('');
     setShareNotice('');
-    if (step !== 'join') {
-      setRoundCodeInput('');
-    }
+    setSelectedJoinRoundId('');
   };
 
   const startNewRoundFlow = () => {
@@ -1127,19 +1354,35 @@ function App() {
               </div>
 
               <div className="input-group">
-                <label>Round code</label>
-                <input
-                  type="text"
-                  value={roundCodeInput}
-                  onChange={(e) => setRoundCodeInput(e.target.value.toUpperCase())}
-                  placeholder="Enter round code"
-                  maxLength={10}
-                />
+                <label>Choose a round</label>
+                {isLoadingRounds ? (
+                  <p className="sync-note">Loading existing rounds...</p>
+                ) : availableRounds.length === 0 ? (
+                  <p className="sync-note">No existing rounds found yet.</p>
+                ) : (
+                  <div className="round-picker-list">
+                    {availableRounds.map((round) => {
+                      const displayName = round.alias?.trim() || round.scorecardName?.trim() || 'Round in progress';
+
+                      return (
+                        <button
+                          key={round.id}
+                          type="button"
+                          className={`round-picker-item${selectedJoinRoundId === round.id ? ' selected' : ''}`}
+                          onClick={() => setSelectedJoinRoundId(round.id)}
+                        >
+                          <span className="round-picker-name">{displayName}</span>
+                          <span className="round-picker-meta">Round code: {round.id}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <button
                 onClick={joinSharedRound}
-                disabled={isConnectingRound || !roundCodeInput.trim() || !isFirebaseConfigured}
+                disabled={isConnectingRound || !selectedJoinRoundId.trim() || !isFirebaseConfigured}
                 className="start-btn"
               >
                 {isConnectingRound ? 'Joining...' : 'Join round'}
@@ -1261,7 +1504,7 @@ function App() {
                     <button
                       type="button"
                       className="reveal-player-btn"
-                      onClick={() => setShowRoundPlayerForm(true)}
+                      onClick={openRoundPlayerPicker}
                     >
                       Add a player
                     </button>
@@ -1280,61 +1523,106 @@ function App() {
                   <>
                     {showRoundPlayerForm && (
                       <>
-                        <div className="player-profile-grid">
-                          <input
-                            type="text"
-                            value={newPlayerFirstName}
-                            onChange={(e) => setNewPlayerFirstName(e.target.value)}
-                            placeholder="First name"
-                            maxLength={30}
-                          />
-                          <input
-                            type="text"
-                            value={newPlayerLastName}
-                            onChange={(e) => setNewPlayerLastName(e.target.value)}
-                            placeholder="Last name"
-                            maxLength={30}
-                          />
-                          <input
-                            type="text"
-                            value={newPlayerNickname}
-                            onChange={(e) => setNewPlayerNickname(e.target.value)}
-                            placeholder="Nickname (optional)"
-                            maxLength={20}
-                          />
-                          <div className="field-with-label">
-                            <label htmlFor="round-player-handicap">Handicap</label>
-                            <input
-                              id="round-player-handicap"
-                              type="number"
-                              inputMode="decimal"
-                              value={newPlayerHandicap}
-                              onChange={(e) => setNewPlayerHandicap(e.target.value)}
-                              placeholder="e.g. 12.4"
-                              min={-10}
-                              max={54}
-                            />
-                          </div>
+                        <div className="player-picker-panel">
+                          <strong>Select an existing player</strong>
+                          {isLoadingPlayerProfiles ? (
+                            <p className="sync-note">Loading players...</p>
+                          ) : playerProfiles.filter((profile) => !gameState.players.some((player) => player.id === profile.id)).length === 0 ? (
+                            <p className="sync-note">No available players to add. Create a new player below.</p>
+                          ) : (
+                            <div className="player-picker-list">
+                              {playerProfiles
+                                .filter((profile) => !gameState.players.some((player) => player.id === profile.id))
+                                .map((profile) => (
+                                  <button
+                                    key={profile.id}
+                                    type="button"
+                                    className="player-picker-item"
+                                    onClick={() => addExistingPlayerToRound(profile)}
+                                  >
+                                    <span className="player-picker-name">{getRoundPlayerDisplayName(profile)}</span>
+                                    <span className="player-picker-meta">Player ID: {profile.id}</span>
+                                  </button>
+                                ))}
+                            </div>
+                          )}
                         </div>
-                        <div className="add-player-form">
+
+                        {!showRoundNewPlayerForm ? (
                           <button
-                            onClick={handleCreatePlayerAndAdd}
-                            disabled={
-                              isSavingPlayer ||
-                              !newPlayerFirstName.trim() ||
-                              !newPlayerLastName.trim() ||
-                              gameState.players.length >= 8
-                            }
+                            type="button"
+                            className="reveal-player-btn secondary"
+                            onClick={() => setShowRoundNewPlayerForm(true)}
                           >
-                            {isSavingPlayer ? 'Saving player...' : 'Create player and add to round'}
+                            Create new player
                           </button>
-                        </div>
+                        ) : (
+                          <>
+                            <div className="player-profile-grid">
+                              <input
+                                type="text"
+                                value={newPlayerFirstName}
+                                onChange={(e) => setNewPlayerFirstName(e.target.value)}
+                                placeholder="First name"
+                                maxLength={30}
+                              />
+                              <input
+                                type="text"
+                                value={newPlayerLastName}
+                                onChange={(e) => setNewPlayerLastName(e.target.value)}
+                                placeholder="Last name"
+                                maxLength={30}
+                              />
+                              <input
+                                type="text"
+                                value={newPlayerNickname}
+                                onChange={(e) => setNewPlayerNickname(e.target.value)}
+                                placeholder="Nickname (optional)"
+                                maxLength={20}
+                              />
+                              <div className="field-with-label">
+                                <label htmlFor="round-player-handicap">Handicap</label>
+                                <input
+                                  id="round-player-handicap"
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={newPlayerHandicap}
+                                  onChange={(e) => setNewPlayerHandicap(e.target.value)}
+                                  placeholder="e.g. 12.4"
+                                  min={-10}
+                                  max={54}
+                                />
+                              </div>
+                            </div>
+                            <div className="add-player-form">
+                              <button
+                                onClick={handleCreatePlayerAndAdd}
+                                disabled={
+                                  isSavingPlayer ||
+                                  !newPlayerFirstName.trim() ||
+                                  !newPlayerLastName.trim() ||
+                                  gameState.players.length >= 8
+                                }
+                              >
+                                {isSavingPlayer ? 'Saving player...' : 'Create player and add to round'}
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className="collapse-player-btn"
+                              onClick={() => setShowRoundNewPlayerForm(false)}
+                            >
+                              Cancel new player
+                            </button>
+                          </>
+                        )}
+
                         <button
                           type="button"
                           className="collapse-player-btn"
-                          onClick={() => setShowRoundPlayerForm(false)}
+                          onClick={closeRoundPlayerPicker}
                         >
-                          Cancel
+                          Done
                         </button>
                       </>
                     )}
@@ -1478,6 +1766,137 @@ function App() {
               <span>Holes: {gameState.totalHoles} · Sets: {playedSetSummary}</span>
               <span>Players: {playersIncluded}</span>
               <span>Match type: {matchupLabel}</span>
+              <div className="round-player-management">
+                <strong>Manage players</strong>
+                {gameState.players.length > 0 && (
+                  <div className="round-player-list">
+                    {gameState.players.map((player) => (
+                      <div key={player.id} className="round-player-item">
+                        <span>{player.name}</span>
+                        <button
+                          type="button"
+                          className="round-player-remove-btn"
+                          onClick={() => {
+                            const removed = removePlayer(player.id);
+                            if (removed) {
+                              setShowRoundInfoPopover(false);
+                            }
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!showRoundPlayerForm ? (
+                  <button
+                    type="button"
+                    className="round-player-add-btn"
+                    onClick={openRoundPlayerPicker}
+                    disabled={gameState.players.length >= 8 || (isMatchPlay && gameState.players.length >= 2)}
+                  >
+                    Add player
+                  </button>
+                ) : (
+                  <>
+                    <div className="round-player-list">
+                      {isLoadingPlayerProfiles ? (
+                        <span>Loading players...</span>
+                      ) : playerProfiles.filter((profile) => !gameState.players.some((player) => player.id === profile.id)).length === 0 ? (
+                        <span>No available players to add.</span>
+                      ) : (
+                        playerProfiles
+                          .filter((profile) => !gameState.players.some((player) => player.id === profile.id))
+                          .map((profile) => (
+                            <div key={profile.id} className="round-player-item">
+                              <span>{getRoundPlayerDisplayName(profile)}</span>
+                              <button
+                                type="button"
+                                className="round-player-add-btn"
+                                onClick={() => addExistingPlayerToRound(profile)}
+                              >
+                                Add
+                              </button>
+                            </div>
+                          ))
+                      )}
+                    </div>
+
+                    {!showRoundNewPlayerForm ? (
+                      <button
+                        type="button"
+                        className="round-player-add-btn"
+                        onClick={() => setShowRoundNewPlayerForm(true)}
+                      >
+                        Create new player
+                      </button>
+                    ) : (
+                      <>
+                        <div className="player-profile-grid round-player-grid">
+                          <input
+                            type="text"
+                            value={newPlayerFirstName}
+                            onChange={(e) => setNewPlayerFirstName(e.target.value)}
+                            placeholder="First name"
+                            maxLength={30}
+                          />
+                          <input
+                            type="text"
+                            value={newPlayerLastName}
+                            onChange={(e) => setNewPlayerLastName(e.target.value)}
+                            placeholder="Last name"
+                            maxLength={30}
+                          />
+                          <input
+                            type="text"
+                            value={newPlayerNickname}
+                            onChange={(e) => setNewPlayerNickname(e.target.value)}
+                            placeholder="Nickname (optional)"
+                            maxLength={20}
+                          />
+                          <div className="field-with-label">
+                            <label htmlFor="popover-round-player-handicap">Handicap</label>
+                            <input
+                              id="popover-round-player-handicap"
+                              type="number"
+                              inputMode="decimal"
+                              value={newPlayerHandicap}
+                              onChange={(e) => setNewPlayerHandicap(e.target.value)}
+                              placeholder="e.g. 12.4"
+                              min={-10}
+                              max={54}
+                            />
+                          </div>
+                        </div>
+                        <div className="add-player-form compact">
+                          <button
+                            type="button"
+                            onClick={handleCreatePlayerAndAdd}
+                            disabled={isSavingPlayer || !newPlayerFirstName.trim() || !newPlayerLastName.trim()}
+                          >
+                            {isSavingPlayer ? 'Saving player...' : 'Create and add'}
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="collapse-player-btn"
+                          onClick={() => setShowRoundNewPlayerForm(false)}
+                        >
+                          Cancel new player
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      className="collapse-player-btn"
+                      onClick={closeRoundPlayerPicker}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </div>
               {syncError && <span className="sync-error">Sync issue: {syncError}</span>}
             </div>
           )}
@@ -1489,7 +1908,9 @@ function App() {
         scores={gameState.scores}
         totalHoles={gameState.totalHoles}
         parValues={gameState.parValues ?? buildDefaultPars(gameState.totalHoles)}
-        courseName={gameState.scorecardName}
+        holeDetails={gameState.holeDetails}
+        courseName={roundTitle}
+        setLabels={gameState.playedSetLabels}
         onScoreUpdate={updateScore}
       />
     </div>

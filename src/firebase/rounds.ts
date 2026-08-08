@@ -1,14 +1,16 @@
 import {
+  collection,
   doc,
   type FirestoreError,
   getDoc,
+  getDocs,
   onSnapshot,
   serverTimestamp,
   setDoc,
   updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { GameState, MatchupConfig, Player, Score } from '../types/index.ts';
+import type { GameState, HoleInfo, MatchupConfig, Player, Score } from '../types/index.ts';
 import { db, isFirebaseConfigured } from './config';
 
 interface RoundDocument {
@@ -18,6 +20,7 @@ interface RoundDocument {
   totalHoles: number;
   alias?: string;
   parValues?: number[];
+  holeDetails?: HoleInfo[];
   scorecardId?: string;
   scorecardName?: string;
   playedSetLabels?: string[];
@@ -25,6 +28,14 @@ interface RoundDocument {
   createdBy: string;
   updatedBy: string;
   createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface RoundSummary {
+  id: string;
+  alias?: string;
+  scorecardName?: string;
+  totalHoles: number;
   updatedAt?: unknown;
 }
 
@@ -50,6 +61,7 @@ const toRoundDocument = (state: GameState, clientId: string): RoundDocument => (
   totalHoles: state.totalHoles,
   alias: state.alias ?? '',
   parValues: state.parValues ?? [],
+  holeDetails: state.holeDetails ?? [],
   scorecardId: state.scorecardId ?? '',
   scorecardName: state.scorecardName ?? '',
   playedSetLabels: state.playedSetLabels ?? [],
@@ -65,11 +77,28 @@ const parseRoundDocument = (data: RoundDocument): GameState => ({
   totalHoles: data.totalHoles ?? 18,
   alias: data.alias ?? '',
   parValues: data.parValues?.length ? data.parValues : undefined,
+  holeDetails: data.holeDetails?.length ? data.holeDetails : undefined,
   scorecardId: data.scorecardId || undefined,
   scorecardName: data.scorecardName || undefined,
   playedSetLabels: data.playedSetLabels?.length ? data.playedSetLabels : undefined,
   matchup: data.matchup,
 });
+
+const parseRoundSummary = (id: string, data: RoundDocument): RoundSummary => ({
+  id,
+  alias: data.alias ?? '',
+  scorecardName: data.scorecardName || undefined,
+  totalHoles: data.totalHoles ?? 18,
+  updatedAt: data.updatedAt,
+});
+
+const getTimestampMillis = (value: unknown): number => {
+  if (value && typeof value === 'object' && 'toMillis' in value && typeof (value as { toMillis: () => number }).toMillis === 'function') {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+
+  return 0;
+};
 
 const ensureFirebase = () => {
   if (!isFirebaseConfigured || !db) {
@@ -173,6 +202,7 @@ export const updateRound = async (
       totalHoles: state.totalHoles,
       alias: state.alias ?? '',
       parValues: state.parValues ?? [],
+      holeDetails: state.holeDetails ?? [],
       scorecardId: state.scorecardId ?? '',
       scorecardName: state.scorecardName ?? '',
       playedSetLabels: state.playedSetLabels ?? [],
@@ -206,6 +236,31 @@ export const loadRound = async (roundId: string): Promise<GameState> => {
     return parseRoundDocument(data);
   } catch (error) {
     throw toUserError(error, 'Unable to join shared round.');
+  }
+};
+
+export const listRounds = async (): Promise<RoundSummary[]> => {
+  const firestore = ensureFirebase();
+
+  try {
+    const snapshot = await getDocs(collection(firestore, 'rounds'));
+    return snapshot.docs
+      .map((roundDoc) => parseRoundSummary(roundDoc.id, roundDoc.data() as RoundDocument))
+      .sort((left, right) => {
+        const rightMillis = getTimestampMillis(right.updatedAt);
+        const leftMillis = getTimestampMillis(left.updatedAt);
+
+        if (rightMillis !== leftMillis) {
+          return rightMillis - leftMillis;
+        }
+
+        const leftName = (left.alias || left.scorecardName || left.id).toLowerCase();
+        const rightName = (right.alias || right.scorecardName || right.id).toLowerCase();
+
+        return leftName.localeCompare(rightName);
+      });
+  } catch (error) {
+    throw toUserError(error, 'Unable to load existing rounds.');
   }
 };
 

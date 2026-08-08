@@ -59,6 +59,7 @@ export interface GameState {
   totalHoles: number;
   alias?: string;
   parValues?: number[];
+  holeDetails?: HoleInfo[];
   scorecardId?: string;
   scorecardName?: string;
   playedSetLabels?: string[];

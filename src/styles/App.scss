@@ -5,23 +5,24 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  gap: $spacing-lg;
   max-width: 1200px;
   width: 100%;
   box-sizing: border-box;
   margin: 0 auto;
-  padding: $spacing-md;
   /* prevent any child from pushing past viewport width */
   overflow-x: hidden;
+  overflow-y: visible;
 
   @media (max-width: $mobile) {
-    padding: $spacing-sm;
+    
   }
 }
 
 .header {
   display: flex;
-  justify-content: center;
-  margin-bottom: $spacing-lg;
+  justify-content: flex-start;
+  padding: $spacing-sm;
 
   .hole-info {
     display: flex;
@@ -265,6 +266,45 @@
     font-size: $font-xs;
     color: $gray;
   }
+
+    .round-picker-list {
+      display: flex;
+      flex-direction: column;
+      gap: $spacing-sm;
+      margin-top: $spacing-sm;
+    }
+
+    .round-picker-item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      width: 100%;
+      padding: $spacing-sm $spacing-md;
+      border-radius: $border-radius-md;
+      background: $light-color;
+      border: 2px solid transparent;
+      text-align: left;
+
+      &:hover {
+        background: color.adjust($light-color, $lightness: -4%);
+      }
+
+      &.selected {
+        border-color: $primary-color;
+        background: color.adjust($primary-color, $lightness: 38%);
+      }
+    }
+
+    .round-picker-name {
+      font-weight: 700;
+      color: $dark-color;
+    }
+
+    .round-picker-meta {
+      font-size: $font-xs;
+      color: $gray;
+    }
 
   .selected-player-summary {
     display: flex;
@@ -804,8 +844,8 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: $spacing-sm;
   pointer-events: none;
+  padding: 0 $spacing-sm;
 }
 
 .scorecard-logo-btn,
@@ -860,10 +900,12 @@
 }
 
 .round-info-popover {
+  pointer-events: auto;
   position: absolute;
   top: calc(100% + #{$spacing-xs});
   right: 0;
   width: min(88vw, 320px);
+  max-height: min(76dvh, 560px);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -872,6 +914,8 @@
   background: rgba($white, 0.98);
   border: 1px solid color.adjust($light-color, $lightness: -8%);
   box-shadow: $shadow-md;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 
   strong {
     font-size: $font-md;
@@ -891,6 +935,112 @@
     color: $danger-color;
     font-size: $font-sm;
     font-weight: 600;
+  }
+
+  .round-player-management {
+    margin-top: $spacing-xs;
+    padding-top: $spacing-xs;
+    border-top: 1px solid color.adjust($light-color, $lightness: -6%);
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xs;
+
+    strong {
+      font-size: $font-sm;
+      color: $dark-color;
+    }
+  }
+
+  .round-player-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+
+  .round-player-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
+    padding: 8px 10px;
+    border-radius: $border-radius-sm;
+    background: color.adjust($light-color, $lightness: -1%);
+
+    span {
+      flex: 1;
+      font-size: $font-xs;
+      color: $dark-color;
+      word-break: break-word;
+    }
+  }
+
+  .round-player-add-btn,
+  .round-player-remove-btn {
+    border-radius: $border-radius-sm;
+    font-size: $font-xs;
+    font-weight: 600;
+    padding: 6px 10px;
+    flex-shrink: 0;
+  }
+
+  .round-player-add-btn {
+    background: $secondary-color;
+    color: $white;
+
+    &:hover {
+      background: color.adjust($secondary-color, $lightness: -8%);
+    }
+
+    &:disabled {
+      background: $gray;
+      cursor: not-allowed;
+    }
+  }
+
+  .round-player-remove-btn {
+    background: $danger-color;
+    color: $white;
+
+    &:hover {
+      background: color.adjust($danger-color, $lightness: -10%);
+    }
+  }
+
+  .round-player-grid {
+    margin-top: $spacing-xs;
+
+    input {
+      padding: 10px 12px;
+      font-size: $font-sm;
+    }
+  }
+
+  .add-player-form.compact {
+    margin-bottom: $spacing-sm;
+
+    button {
+      padding: 10px 12px;
+      font-size: $font-sm;
+    }
+  }
+
+  .collapse-player-btn {
+    margin-bottom: 0;
+  }
+}
+
+@media (max-width: $mobile) and (orientation: landscape) {
+  .round-info-popover {
+    width: min(92vw, 360px);
+    max-height: calc(100dvh - 72px);
+    padding: $spacing-sm;
+    gap: $spacing-xs;
+  }
+
+  .round-info-popover .round-player-list {
+    max-height: min(32dvh, 120px);
   }
 }
 
