@@ -9,6 +9,7 @@ interface ScoreCardProps {
   onNextHole: () => void;
   onPrevHole: () => void;
   totalHoles: number;
+  matchStatus?: string;
 }
 
 export default function ScoreCard({
@@ -18,7 +19,8 @@ export default function ScoreCard({
   onScoreUpdate,
   onNextHole,
   onPrevHole,
-  totalHoles
+  totalHoles,
+  matchStatus
 }: ScoreCardProps) {
   const getScore = (playerId: string, hole: number): number => {
     const score = scores.find(s => s.playerId === playerId && s.hole === hole);
@@ -51,6 +53,7 @@ export default function ScoreCard({
 
   return (
     <div className="scorecard">
+      {matchStatus && <div className="match-status-banner">{matchStatus}</div>}
       <div className="hole-navigation">
         <button 
           onClick={onPrevHole} 

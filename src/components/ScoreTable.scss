@@ -217,7 +217,8 @@
 }
 
 .legend {
-  display: flex;
+  // Temporarily hidden per product request; keep styles for quick restore.
+  display: none;
   justify-content: center;
   gap: $spacing-lg;
   margin-top: $spacing-md;

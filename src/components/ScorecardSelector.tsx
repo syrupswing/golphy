@@ -95,7 +95,8 @@ export default function ScorecardSelector({
           className={`scorecard-option ${selectedId === null ? 'selected' : ''}`}
           onClick={() => onSelect(null)}
         >
-          Default pars
+          No saved course
+          <span className="scorecard-holes">Use default par values</span>
         </button>
         {scorecards.map((sc) => (
           <button
@@ -113,7 +114,7 @@ export default function ScorecardSelector({
           className={`scorecard-option add-new ${showForm ? 'selected' : ''}`}
           onClick={() => setShowForm((v) => !v)}
         >
-          + New course
+          + Add new course
         </button>
       </div>
 
@@ -149,12 +150,13 @@ export default function ScorecardSelector({
 
             return (
               <div key={setIndex} className="set-section">
+                <p className="set-label">Set {setIndex + 1} (holes {startHole}-{startHole + 8})</p>
                 <input
                   type="text"
                   className="set-alias-input"
                   value={set.alias ?? ''}
                   onChange={(e) => handleAliasChange(setIndex, e.target.value)}
-                  placeholder={`Holes ${startHole}–${startHole + 8} name (optional)`}
+                  placeholder={`Set name for holes ${startHole}-${startHole + 8}`}
                   maxLength={30}
                 />
                 <div className="set-table-wrapper">

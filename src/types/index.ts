@@ -29,6 +29,29 @@ export interface Scorecard {
   isPublic?: boolean;
 }
 
+export interface PlayerProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  nickname?: string;
+  handicap: number;
+  createdBy?: string;
+  isPublic?: boolean;
+}
+
+export type MatchupFormat = 'stroke' | 'match-play';
+
+export interface MatchupTeam {
+  id: string;
+  name: string;
+  playerIds: string[];
+}
+
+export interface MatchupConfig {
+  format: MatchupFormat;
+  teams: MatchupTeam[];
+}
+
 export interface GameState {
   players: Player[];
   scores: Score[];
@@ -38,4 +61,6 @@ export interface GameState {
   parValues?: number[];
   scorecardId?: string;
   scorecardName?: string;
+  playedSetLabels?: string[];
+  matchup?: MatchupConfig;
 }

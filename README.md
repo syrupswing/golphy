@@ -42,6 +42,24 @@ firebase deploy --only firestore:rules
 
 The included `firestore.rules` currently allows read/write for anyone with the round code. This is useful for quick multiplayer testing. For production, switch to authenticated rules.
 
+## Player profiles collection
+
+The app now includes a dedicated Firestore collection for reusable player profiles:
+
+- Collection: `players`
+- Minimum fields:
+	- `firstName` (string)
+	- `lastName` (string)
+	- `nickname` (string, optional)
+	- `handicap` (number)
+
+Access helpers are in `src/firebase/players.ts`:
+
+- `createPlayer(...)`
+- `listPlayers()`
+- `getPlayer(id)`
+- `updatePlayer(id, updates)`
+
 ### 5) Use shared rounds in the app
 
 1. Add players and hole count.

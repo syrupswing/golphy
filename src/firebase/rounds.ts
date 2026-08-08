@@ -8,7 +8,7 @@ import {
   updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { GameState, Player, Score } from '../types/index.ts';
+import type { GameState, MatchupConfig, Player, Score } from '../types/index.ts';
 import { db, isFirebaseConfigured } from './config';
 
 interface RoundDocument {
@@ -20,6 +20,8 @@ interface RoundDocument {
   parValues?: number[];
   scorecardId?: string;
   scorecardName?: string;
+  playedSetLabels?: string[];
+  matchup?: MatchupConfig;
   createdBy: string;
   updatedBy: string;
   createdAt?: unknown;
@@ -50,6 +52,8 @@ const toRoundDocument = (state: GameState, clientId: string): RoundDocument => (
   parValues: state.parValues ?? [],
   scorecardId: state.scorecardId ?? '',
   scorecardName: state.scorecardName ?? '',
+  playedSetLabels: state.playedSetLabels ?? [],
+  matchup: state.matchup,
   createdBy: clientId,
   updatedBy: clientId,
 });
@@ -63,6 +67,8 @@ const parseRoundDocument = (data: RoundDocument): GameState => ({
   parValues: data.parValues?.length ? data.parValues : undefined,
   scorecardId: data.scorecardId || undefined,
   scorecardName: data.scorecardName || undefined,
+  playedSetLabels: data.playedSetLabels?.length ? data.playedSetLabels : undefined,
+  matchup: data.matchup,
 });
 
 const ensureFirebase = () => {
@@ -169,6 +175,8 @@ export const updateRound = async (
       parValues: state.parValues ?? [],
       scorecardId: state.scorecardId ?? '',
       scorecardName: state.scorecardName ?? '',
+      playedSetLabels: state.playedSetLabels ?? [],
+      matchup: state.matchup ?? null,
       updatedBy: clientId,
       updatedAt: serverTimestamp(),
     });

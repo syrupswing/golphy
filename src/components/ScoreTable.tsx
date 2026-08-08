@@ -12,6 +12,19 @@ interface ScoreTableProps {
 }
 
 export default function ScoreTable({ players, scores, totalHoles, parValues, courseName, onScoreUpdate }: ScoreTableProps) {
+  const holeGroups = Array.from({ length: Math.ceil(totalHoles / 9) }, (_, index) => {
+    const start = index * 9 + 1;
+    const end = Math.min(start + 8, totalHoles);
+    const holes = Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+
+    return {
+      start,
+      end,
+      holes,
+      label: index === 0 ? 'OUT' : index === 1 ? 'IN' : `SET ${index + 1}`,
+    };
+  });
+
   const getScore = (playerId: string, hole: number): number | null => {
     const score = scores.find(s => s.playerId === playerId && s.hole === hole);
     return score ? score.strokes : null;
@@ -22,32 +35,20 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, cou
     return score || 0;
   };
 
-  const getOutScore = (playerId: string): number => {
+  const getSegmentScore = (playerId: string, start: number, end: number): number => {
     let total = 0;
-    for (let i = 1; i <= 9; i++) {
-      total += getHoleScore(playerId, i);
-    }
-    return total;
-  };
-
-  const getInScore = (playerId: string): number => {
-    let total = 0;
-    for (let i = 10; i <= totalHoles; i++) {
+    for (let i = start; i <= end; i++) {
       total += getHoleScore(playerId, i);
     }
     return total;
   };
 
   const getTotalScore = (playerId: string): number => {
-    return getOutScore(playerId) + getInScore(playerId);
+    return getSegmentScore(playerId, 1, totalHoles);
   };
 
-  const getOutPar = (): number => {
-    return parValues.slice(0, 9).reduce((sum, par) => sum + par, 0);
-  };
-
-  const getInPar = (): number => {
-    return parValues.slice(9, 18).reduce((sum, par) => sum + par, 0);
+  const getSegmentPar = (start: number, end: number): number => {
+    return parValues.slice(start - 1, end).reduce((sum, par) => sum + par, 0);
   };
 
   const getTotalPar = (): number => {
@@ -113,28 +114,28 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, cou
           <thead>
             <tr>
               <th className="player-header">PLAYER</th>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(hole => (
-                <th key={hole} className="hole-header">{hole}</th>
+              {holeGroups.map((group) => (
+                <React.Fragment key={group.label}>
+                  {group.holes.map((hole) => (
+                    <th key={hole} className="hole-header">{hole}</th>
+                  ))}
+                  <th className="total-header">{group.label}</th>
+                </React.Fragment>
               ))}
-              <th className="total-header">OUT</th>
-              {[10, 11, 12, 13, 14, 15, 16, 17, 18].map(hole => (
-                <th key={hole} className="hole-header">{hole}</th>
-              ))}
-              <th className="total-header">IN</th>
               <th className="total-header">TOTAL</th>
             </tr>
           </thead>
           <tbody>
             <tr className="par-row">
               <td className="label-cell">PAR</td>
-              {parValues.slice(0, 9).map((par, idx) => (
-                <td key={idx} className="par-cell">{par}</td>
+              {holeGroups.map((group) => (
+                <React.Fragment key={`par-${group.label}`}>
+                  {group.holes.map((hole) => (
+                    <td key={hole} className="par-cell">{parValues[hole - 1] ?? 4}</td>
+                  ))}
+                  <td className="total-cell">{getSegmentPar(group.start, group.end)}</td>
+                </React.Fragment>
               ))}
-              <td className="total-cell">{getOutPar()}</td>
-              {parValues.slice(9, 18).map((par, idx) => (
-                <td key={idx} className="par-cell">{par}</td>
-              ))}
-              <td className="total-cell">{getInPar()}</td>
               <td className="total-cell">{getTotalPar()}</td>
             </tr>
             {players.map(player => (
@@ -144,18 +145,18 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, cou
                     <span className="player-name">{player.name}</span>
                   </div>
                 </td>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(hole => 
-                  <React.Fragment key={hole}>
-                    {renderHoleCell(player.id, hole, parValues[hole - 1])}
+                {holeGroups.map((group) => (
+                  <React.Fragment key={`player-${player.id}-${group.label}`}>
+                    {group.holes.map((hole) => (
+                      <React.Fragment key={hole}>
+                        {renderHoleCell(player.id, hole, parValues[hole - 1] ?? 4)}
+                      </React.Fragment>
+                    ))}
+                    <td className="total-cell">
+                      <span className="score-text">{getSegmentScore(player.id, group.start, group.end) || ''}</span>
+                    </td>
                   </React.Fragment>
-                )}
-                <td className="total-cell"><span className="score-text">{getOutScore(player.id) || ''}</span></td>
-                {[10, 11, 12, 13, 14, 15, 16, 17, 18].map(hole => 
-                  <React.Fragment key={hole}>
-                    {renderHoleCell(player.id, hole, parValues[hole - 1])}
-                  </React.Fragment>
-                )}
-                <td className="total-cell"><span className="score-text">{getInScore(player.id) || ''}</span></td>
+                ))}
                 <td className="total-cell bold"><span className="score-text">{getTotalScore(player.id) || ''}</span></td>
               </tr>
             ))}

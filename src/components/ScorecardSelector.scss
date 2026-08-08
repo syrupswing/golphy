@@ -88,6 +88,15 @@
     gap: $spacing-sm;
     border-top: 1px solid color.adjust($light-color, $lightness: -12%);
     padding-top: $spacing-sm;
+
+    .set-label {
+      margin: 0;
+      font-size: $font-xs;
+      font-weight: 700;
+      color: color.adjust($dark-color, $lightness: 18%);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
   }
 
   .set-alias-input {

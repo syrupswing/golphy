@@ -8,6 +8,16 @@
   box-shadow: $shadow-md;
 }
 
+.match-status-banner {
+  margin-bottom: $spacing-md;
+  padding: $spacing-sm $spacing-md;
+  border-radius: $border-radius-md;
+  background: color.adjust($primary-color, $lightness: 40%);
+  color: $dark-color;
+  font-weight: 700;
+  text-align: center;
+}
+
 .hole-navigation {
   display: flex;
   justify-content: space-between;
