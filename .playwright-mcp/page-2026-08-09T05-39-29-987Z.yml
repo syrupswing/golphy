@@ -1,0 +1,28 @@
+- generic [ref=f1e3]:
+  - button "Go to home" [ref=f1e5] [cursor=pointer]:
+    - img "Golphy Logo" [ref=f1e6]
+  - generic [ref=f1e7]:
+    - heading "Start here" [level=2] [ref=f1e8]
+    - paragraph [ref=f1e9]: Choose one action to continue.
+    - generic [ref=f1e10]:
+      - button "Start a new round Set the course, add players, and begin scoring." [ref=f1e11] [cursor=pointer]:
+        - generic [ref=f1e12]: Start a new round
+        - generic [ref=f1e13]: Set the course, add players, and begin scoring.
+      - button "Join an existing round Enter a round code from another player." [ref=f1e14] [cursor=pointer]:
+        - generic [ref=f1e15]: Join an existing round
+        - generic [ref=f1e16]: Enter a round code from another player.
+    - generic [ref=f1e17]:
+      - heading "Players" [level=3] [ref=f1e18]
+      - generic [ref=f1e19]:
+        - button "Add new" [ref=f1e20] [cursor=pointer]
+        - button "Edit existing" [ref=f1e21] [cursor=pointer]
+    - generic [ref=f1e22]:
+      - heading "Courses" [level=3] [ref=f1e23]
+      - generic [ref=f1e24]:
+        - button "Add new" [ref=f1e25] [cursor=pointer]
+        - button "Edit existing" [ref=f1e26] [cursor=pointer]
+    - generic [ref=f1e27]:
+      - heading "Tournaments" [level=3] [ref=f1e28]
+      - generic [ref=f1e29]:
+        - button "Add new" [ref=f1e30] [cursor=pointer]
+        - button "Edit existing" [ref=f1e31] [cursor=pointer]

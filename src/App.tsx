@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Player, PlayerProfile, Score, GameState, Scorecard, NineHoleSet, HoleInfo, StrokeIndexAllocation, Tournament, TournamentEntry, TournamentFormat } from './types/index.ts'
+import type { Player, PlayerProfile, Score, GameState, Scorecard, NineHoleSet, HoleInfo, StrokeIndexAllocation, Tournament } from './types/index.ts'
 import ScoreTable from './components/ScoreTable'
 import ScorecardSelector from './components/ScorecardSelector'
 import TournamentManager from './components/TournamentManager'
+import TournamentDashboard from './components/TournamentDashboard'
 import { isFirebaseConfigured } from './firebase/config'
 import {
   createRound,
@@ -20,6 +21,7 @@ import {
   listTournaments,
   updateTournament,
 } from './firebase/tournaments'
+import type { TournamentInput } from './firebase/tournaments'
 import './styles/App.scss'
 import golphyBanner from './assets/Golphy-banner.svg'
 
@@ -40,7 +42,7 @@ const DEFAULT_GAME_STATE: GameState = {
 };
 
 interface PersistedAppSession {
-  view: 'home' | 'game';
+  view: 'home' | 'game' | 'tournament';
   homeStep: 'choose' | 'new' | 'join';
   newRoundStep: 'course' | 'details';
   competitionType: 'stroke' | 'match-play';
@@ -52,6 +54,7 @@ interface PersistedAppSession {
   selectedJoinRoundId: string;
   selectedScorecard: Scorecard | null;
   selectedSetIndexes: number[];
+  activeTournamentId: string | null;
 }
 
 const createClientId = (): string => {
@@ -71,7 +74,7 @@ function App() {
     nickname?: string;
     handicap: number;
   } | null>(null);
-  const [view, setView] = useState<'home' | 'game'>('home');
+  const [view, setView] = useState<'home' | 'game' | 'tournament'>('home');
   const [homeStep, setHomeStep] = useState<'choose' | 'new' | 'join'>('choose');
   const [newRoundStep, setNewRoundStep] = useState<'course' | 'details'>('course');
   const [competitionType, setCompetitionType] = useState<'stroke' | 'match-play'>('stroke');
@@ -114,9 +117,16 @@ function App() {
   const [coursePanelMode, setCoursePanelMode] = useState<'closed' | 'add' | 'edit'>('closed');
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [tournamentPanelMode, setTournamentPanelMode] = useState<'closed' | 'add' | 'edit'>('closed');
+  const [activeTournamentId, setActiveTournamentId] = useState<string | null>(null);
   const [isSavingTournament, setIsSavingTournament] = useState(false);
   const [tournamentError, setTournamentError] = useState('');
   const [tournamentNotice, setTournamentNotice] = useState('');
+  const [tournamentRoundOptions, setTournamentRoundOptions] = useState<Array<{
+    id: string;
+    alias?: string;
+    scorecardName?: string;
+    totalHoles: number;
+  }>>([]);
   const [homeCourseSelection, setHomeCourseSelection] = useState<Scorecard | null>(null);
   const [showRoundInfoPopover, setShowRoundInfoPopover] = useState(false);
   const [availableRounds, setAvailableRounds] = useState<Array<{
@@ -156,7 +166,7 @@ function App() {
         setGameState(session.gameState);
       }
 
-      if (session.view === 'home' || session.view === 'game') {
+      if (session.view === 'home' || session.view === 'game' || session.view === 'tournament') {
         setView(session.view);
       }
 
@@ -198,6 +208,10 @@ function App() {
 
       if (Array.isArray(session.selectedSetIndexes)) {
         setSelectedSetIndexes(session.selectedSetIndexes);
+      }
+
+      if (typeof session.activeTournamentId === 'string') {
+        setActiveTournamentId(session.activeTournamentId);
       }
     } catch {
       window.localStorage.removeItem(APP_SESSION_STORAGE_KEY);
@@ -279,12 +293,17 @@ function App() {
     }
   };
 
-  const openTournamentPanel = (nextMode: 'add' | 'edit') => {
-    setTournamentPanelMode(nextMode);
+  const openTournamentPanel = (nextMode: 'add' | 'edit') => {    setTournamentPanelMode(nextMode);
     setTournamentError('');
     setTournamentNotice('');
     void refreshPlayerProfiles();
     void refreshTournaments();
+
+    if (isFirebaseConfigured) {
+      listRounds()
+        .then(setTournamentRoundOptions)
+        .catch(() => setTournamentRoundOptions([]));
+    }
   };
 
   const saveTournament = async (
@@ -313,21 +332,13 @@ function App() {
     }
   };
 
-  const handleCreateTournament = (
-    name: string,
-    format: TournamentFormat,
-    entries: TournamentEntry[]
-  ) => saveTournament(() => createTournament({ name, format, entries }, clientId), 'Tournament created.');
+  const handleCreateTournament = (input: TournamentInput) =>
+    saveTournament(() => createTournament(input, clientId), 'Tournament created.');
 
-  const handleUpdateTournament = (
-    id: string,
-    name: string,
-    format: TournamentFormat,
-    entries: TournamentEntry[]
-  ) => saveTournament(() => updateTournament(id, { name, format, entries }), 'Tournament updated.');
+  const handleUpdateTournament = (id: string, input: TournamentInput) =>
+    saveTournament(() => updateTournament(id, input), 'Tournament updated.');
 
-  const handleDeleteTournament = async (id: string): Promise<boolean> => {
-    setIsSavingTournament(true);
+  const handleDeleteTournament = async (id: string): Promise<boolean> => {    setIsSavingTournament(true);
     setTournamentError('');
     setTournamentNotice('');
 
@@ -349,6 +360,12 @@ function App() {
     void refreshPlayerProfiles();
     void refreshTournaments();
   }, []);
+
+  const openTournamentDashboard = (tournamentId: string) => {
+    setActiveTournamentId(tournamentId);
+    setView('tournament');
+    void refreshPlayerProfiles();
+  };
 
   useEffect(() => {
     if (homeStep !== 'join') {
@@ -441,10 +458,12 @@ function App() {
       selectedJoinRoundId,
       selectedScorecard,
       selectedSetIndexes,
+      activeTournamentId,
     };
 
     window.localStorage.setItem(APP_SESSION_STORAGE_KEY, JSON.stringify(sessionToPersist));
   }, [
+    activeTournamentId,
     competitionType,
     gameStarted,
     gameState,
@@ -713,6 +732,22 @@ function App() {
 
   const getRoundPlayerDisplayName = (profile: PlayerProfile) =>
     profile.nickname?.trim() || `${profile.firstName} ${profile.lastName}`;
+
+  // The round stores a name only as a fallback; the profile is the source of truth.
+  const resolvePlayer = (player: Player): Player => {
+    const profile = playerProfiles.find((candidate) => candidate.id === player.id);
+    if (!profile) {
+      return player;
+    }
+
+    return {
+      ...player,
+      name: getRoundPlayerDisplayName(profile),
+      handicap: profile.handicap,
+    };
+  };
+
+  const resolvedPlayers = gameState.players.map(resolvePlayer);
 
   const openRoundPlayerPicker = () => {
     setShowRoundPlayerForm(true);
@@ -1412,6 +1447,29 @@ function App() {
     </>
   );
 
+  if (view === 'tournament' && activeTournamentId) {
+    return (
+      <div className="app">
+        <div className="header">
+          <button onClick={goHome} className="logo-btn" aria-label="Go to home">
+            <img src={golphyBanner} width="139" alt="Golphy Logo" className="logo" />
+          </button>
+        </div>
+
+        <TournamentDashboard
+          tournamentId={activeTournamentId}
+          initialTournament={tournaments.find((t) => t.id === activeTournamentId) ?? null}
+          playerProfiles={playerProfiles}
+          clientId={clientId}
+          onManage={() => {
+            setView('home');
+            openTournamentPanel('edit');
+          }}
+        />
+      </div>
+    );
+  }
+
   if (view === 'home') {
     return (
       <div className="app">
@@ -1602,29 +1660,55 @@ function App() {
               <div className="quick-course-panel">
                 <h3>Tournaments</h3>
                 {tournamentPanelMode === 'closed' ? (
-                  <div className="player-action-row">
-                    <button
-                      type="button"
-                      className="reveal-player-btn"
-                      onClick={() => openTournamentPanel('add')}
-                    >
-                      Add new
-                    </button>
-                    <button
-                      type="button"
-                      className="reveal-player-btn secondary"
-                      onClick={() => openTournamentPanel('edit')}
-                    >
-                      Edit existing
-                    </button>
-                  </div>
+                  <>
+                    <div className="player-action-row">
+                      <button
+                        type="button"
+                        className="reveal-player-btn"
+                        onClick={() => openTournamentPanel('add')}
+                      >
+                        Add new
+                      </button>
+                      <button
+                        type="button"
+                        className="reveal-player-btn secondary"
+                        onClick={() => openTournamentPanel('edit')}
+                      >
+                        Edit existing
+                      </button>
+                    </div>
+
+                    {tournaments.length > 0 && (
+                      <div className="round-picker-list">
+                        {tournaments.map((tournament) => (
+                          <button
+                            key={tournament.id}
+                            type="button"
+                            className="round-picker-item"
+                            onClick={() => openTournamentDashboard(tournament.id)}
+                          >
+                            <span className="round-picker-name">{tournament.name}</span>
+                            <span className="round-picker-meta">
+                              {tournament.format === 'team' ? 'Team' : 'Individual'} ·{' '}
+                              {tournament.entries.length}{' '}
+                              {tournament.format === 'team' ? 'teams' : 'players'} ·{' '}
+                              {(tournament.rounds ?? []).length} round
+                              {(tournament.rounds ?? []).length === 1 ? '' : 's'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <>
                     <TournamentManager
                       mode={tournamentPanelMode}
                       tournaments={tournaments}
                       playerProfiles={playerProfiles}
+                      playableRounds={tournamentRoundOptions}
                       isSaving={isSavingTournament}
+                      clientId={clientId}
                       onCreate={handleCreateTournament}
                       onUpdate={handleUpdateTournament}
                       onDelete={handleDeleteTournament}
@@ -2009,7 +2093,7 @@ function App() {
 
               {gameState.players.length > 0 && (
                 <div className="players-list">
-                  {gameState.players.map(player => (
+                  {resolvedPlayers.map(player => (
                     <div key={player.id} className="player-item">
                       <div
                         className="color-indicator"
@@ -2084,11 +2168,14 @@ function App() {
       : `Set 1 (1-${Math.min(9, gameState.totalHoles)})`;
   const playersIncluded =
     gameState.players.length > 0
-      ? gameState.players.map((player) => player.name).join(', ')
+      ? resolvedPlayers.map((player) => player.name).join(', ')
       : 'No players';
   const matchupLabel =
     gameState.matchup?.format === 'match-play' ? '1-on-1 match play' : 'Stroke play';
-  const roundTitle = roundAlias || gameState.scorecardName || 'Round in progress';
+  // Prefer the saved course's current name so renames show up in existing rounds.
+  const liveCourseName =
+    scorecards.find((sc) => sc.id === gameState.scorecardId)?.name || gameState.scorecardName;
+  const roundTitle = roundAlias || liveCourseName || 'Round in progress';
 
   return (
     <div className="app">
@@ -2120,7 +2207,7 @@ function App() {
               aria-label="Round details"
             >
               <strong>{roundTitle}</strong>
-              <span>Course: {gameState.scorecardName || 'Custom course'}</span>
+              <span>Course: {liveCourseName || 'Custom course'}</span>
               <span>Holes: {gameState.totalHoles} · Sets: {playedSetSummary}</span>
               <span>Players: {playersIncluded}</span>
               <span>Match type: {matchupLabel}</span>
@@ -2128,7 +2215,7 @@ function App() {
                 <strong>Manage players</strong>
                 {gameState.players.length > 0 && (
                   <div className="round-player-list">
-                    {gameState.players.map((player) => (
+                    {resolvedPlayers.map((player) => (
                       <div key={player.id} className="round-player-item">
                         <span>{player.name}</span>
                         <button
@@ -2262,13 +2349,13 @@ function App() {
       </div>
 
       <ScoreTable
-        players={gameState.players}
+        players={resolvedPlayers}
         scores={gameState.scores}
         totalHoles={gameState.totalHoles}
         parValues={gameState.parValues ?? buildDefaultPars(gameState.totalHoles)}
         roundTitle={roundTitle}
         holeDetails={gameState.holeDetails}
-        courseName={gameState.scorecardName}
+        courseName={liveCourseName}
         setLabels={gameState.playedSetLabels}
         matchup={gameState.matchup}
         onScoreUpdate={updateScore}

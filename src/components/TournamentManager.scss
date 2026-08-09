@@ -93,6 +93,21 @@
   }
 }
 
+.tournament-tier-mode {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  padding: $spacing-sm;
+  border-radius: $border-radius-md;
+  background: color.adjust($light-color, $lightness: 1%);
+
+  > span {
+    font-size: $font-xs;
+    font-weight: 700;
+    color: $gray;
+  }
+}
+
 .tournament-entry {
   display: flex;
   flex-direction: column;
@@ -139,6 +154,9 @@
 }
 
 .tournament-player-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
   background: $light-color;
@@ -151,6 +169,97 @@
     background: color.adjust($primary-color, $lightness: 38%);
     border-color: $primary-color;
   }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.tournament-player-hcp {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color.adjust($light-color, $lightness: -6%);
+  font-size: 11px;
+  font-weight: 700;
+  color: $gray;
+}
+
+.tournament-tiers {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  padding-top: $spacing-xs;
+  border-top: 1px solid color.adjust($light-color, $lightness: -8%);
+}
+
+.tournament-tier-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-xs;
+  font-weight: 700;
+
+  .is-met {
+    color: color.adjust($secondary-color, $lightness: -18%);
+  }
+
+  .is-short {
+    color: $danger-color;
+  }
+
+  button {
+    margin-left: auto;
+    padding: 4px 10px;
+    border-radius: $border-radius-sm;
+    background: $light-color;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+    color: $dark-color;
+    font-size: 11px;
+    font-weight: 600;
+  }
+}
+
+.tournament-tier-row {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.tournament-tier-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: $font-xs;
+  font-weight: 600;
+  color: $dark-color;
+}
+
+.tournament-tier-toggle {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+
+  button {
+    width: 30px;
+    height: 28px;
+    padding: 0;
+    border-radius: $border-radius-sm;
+    background: $light-color;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+    color: $dark-color;
+    font-size: $font-xs;
+    font-weight: 700;
+
+    &.active {
+      background: $primary-color;
+      border-color: $primary-color;
+      color: $white;
+    }
+  }
 }
 
 .tournament-add-entry {
@@ -162,6 +271,21 @@
   color: $dark-color;
   font-size: $font-xs;
   font-weight: 600;
+}
+
+.tournament-save-state {
+  margin: 0;
+  font-size: $font-xs;
+  font-weight: 600;
+  color: $gray;
+
+  &.is-saved {
+    color: color.adjust($secondary-color, $lightness: -18%);
+  }
+
+  &.is-error {
+    color: $danger-color;
+  }
 }
 
 .tournament-actions {

@@ -1,0 +1,4 @@
+- generic [ref=f4e3]:
+  - button "Go to home" [ref=f4e5] [cursor=pointer]:
+    - img "Golphy Logo" [ref=f4e6]
+  - paragraph [ref=f4e8]: Loading tournament...

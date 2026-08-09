@@ -6,18 +6,36 @@ import {
   type FirestoreError,
   getDoc,
   getDocs,
+  onSnapshot,
   serverTimestamp,
+  type Unsubscribe,
   updateDoc,
 } from 'firebase/firestore';
-import type { Tournament, TournamentEntry, TournamentFormat } from '../types/index.ts';
+import type {
+  PlayerTier,
+  TierAssignmentMode,
+  Tournament,
+  TournamentEntry,
+  TournamentFormat,
+  TournamentMatchupFormat,
+  TournamentRound,
+} from '../types/index.ts';
+import { HOLES_PER_GAME, MATCHUP_FORMAT_LABELS } from '../tournaments/scoring';
 import { db, isFirebaseConfigured } from './config';
+
+// Team tournaments are played with a fixed two-A, two-B roster.
+export const REQUIRED_TIER_COUNTS: Record<PlayerTier, number> = { A: 2, B: 2 };
+export const TEAM_SIZE = REQUIRED_TIER_COUNTS.A + REQUIRED_TIER_COUNTS.B;
 
 interface TournamentDocument {
   name: string;
   nameKey: string;
   format: TournamentFormat;
+  tierMode?: TierAssignmentMode;
   entries: TournamentEntry[];
+  rounds?: TournamentRound[];
   createdBy?: string;
+  updatedBy?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -25,7 +43,9 @@ interface TournamentDocument {
 export interface TournamentInput {
   name: string;
   format: TournamentFormat;
+  tierMode: TierAssignmentMode;
   entries: TournamentEntry[];
+  rounds: TournamentRound[];
 }
 
 const ensureFirebase = () => {
@@ -70,21 +90,70 @@ const parseDoc = (id: string, data: TournamentDocument): Tournament => ({
   id,
   name: data.name,
   format: data.format === 'team' ? 'team' : 'individual',
+  tierMode: data.tierMode === 'manual' ? 'manual' : 'auto',
   entries: (data.entries ?? []).map((entry) => ({
     id: entry.id,
     name: entry.name,
     playerIds: entry.playerIds ?? [],
+    playerTiers: entry.playerTiers ?? {},
+  })),
+  rounds: (data.rounds ?? []).map((round) => ({
+    id: round.id,
+    name: round.name,
+    roundId: round.roundId ?? '',
+    matchups: (round.matchups ?? []).map((matchup) => ({
+      id: matchup.id,
+      format: matchup.format,
+      confirmed: matchup.confirmed === true,
+      sides: (matchup.sides ?? []).map((side) => ({
+        entryId: side.entryId ?? '',
+        playerIds: side.playerIds ?? [],
+        scores: side.scores ?? [],
+      })),
+    })),
   })),
   createdBy: data.createdBy,
 });
 
+const sanitizeRounds = (rounds: TournamentRound[]): TournamentRound[] =>
+  rounds.map((round) => ({
+    id: round.id || createEntryId(),
+    name: round.name.trim(),
+    roundId: round.roundId?.trim() ?? '',
+    matchups: round.matchups.map((matchup) => ({
+      id: matchup.id || createEntryId(),
+      format: (MATCHUP_FORMAT_LABELS[matchup.format] ? matchup.format : 'singles') as TournamentMatchupFormat,
+      confirmed: matchup.confirmed === true,
+      sides: matchup.sides.slice(0, 2).map((side) => ({
+        entryId: side.entryId ?? '',
+        playerIds: side.playerIds.filter(Boolean),
+        scores: Array.from({ length: HOLES_PER_GAME }, (_, hole) => {
+          const value = side.scores?.[hole];
+          return Number.isFinite(value) && value > 0 ? value : 0;
+        }),
+      })),
+    })),
+  }));
+
 const sanitizeEntries = (entries: TournamentEntry[], format: TournamentFormat): TournamentEntry[] =>
   entries
-    .map((entry) => ({
-      id: entry.id || createEntryId(),
-      name: entry.name.trim(),
-      playerIds: [...new Set(entry.playerIds.filter(Boolean))],
-    }))
+    .map((entry) => {
+      const playerIds = [...new Set(entry.playerIds.filter(Boolean))];
+      const playerTiers: Record<string, PlayerTier> = {};
+
+      if (format === 'team') {
+        playerIds.forEach((playerId) => {
+          playerTiers[playerId] = entry.playerTiers?.[playerId] === 'A' ? 'A' : 'B';
+        });
+      }
+
+      return {
+        id: entry.id || createEntryId(),
+        name: entry.name.trim(),
+        playerIds,
+        playerTiers,
+      };
+    })
     .filter((entry) => entry.playerIds.length > 0 && (format === 'individual' || entry.name.length > 0));
 
 const validateInput = (input: TournamentInput): TournamentEntry[] => {
@@ -107,6 +176,18 @@ const validateInput = (input: TournamentInput): TournamentEntry[] => {
     if (new Set(nameKeys).size !== nameKeys.length) {
       throw new Error('Team names must be unique within a tournament.');
     }
+
+    entries.forEach((entry) => {
+      const tiers = Object.values(entry.playerTiers ?? {});
+      const aCount = tiers.filter((tier) => tier === 'A').length;
+      const bCount = tiers.filter((tier) => tier === 'B').length;
+
+      if (aCount !== REQUIRED_TIER_COUNTS.A || bCount !== REQUIRED_TIER_COUNTS.B) {
+        throw new Error(
+          `${entry.name} needs ${REQUIRED_TIER_COUNTS.A} A players and ${REQUIRED_TIER_COUNTS.B} B players (currently ${aCount}A / ${bCount}B).`
+        );
+      }
+    });
   }
 
   const assignedPlayerIds = entries.flatMap((entry) => entry.playerIds);
@@ -166,7 +247,9 @@ export const createTournament = async (
     name: input.name.trim(),
     nameKey: toNameKey(input.name),
     format: input.format,
+    tierMode: input.tierMode,
     entries,
+    rounds: sanitizeRounds(input.rounds ?? []),
     createdBy: clientId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -192,13 +275,22 @@ export const updateTournament = async (
     name: input.name.trim(),
     nameKey: toNameKey(input.name),
     format: input.format,
+    tierMode: input.tierMode,
     entries,
+    rounds: sanitizeRounds(input.rounds ?? []),
     updatedAt: serverTimestamp(),
   };
 
   try {
     await updateDoc(doc(firestore, 'tournaments', id), payload);
-    return { id, name: payload.name, format: payload.format, entries };
+    return {
+      id,
+      name: payload.name,
+      format: payload.format,
+      tierMode: payload.tierMode,
+      entries,
+      rounds: payload.rounds,
+    };
   } catch (error) {
     throw toUserError(error, 'Failed to update tournament.');
   }
@@ -212,6 +304,49 @@ export const deleteTournament = async (id: string): Promise<void> => {
   } catch (error) {
     throw toUserError(error, 'Failed to delete tournament.');
   }
+};
+
+// Scores save continuously, so this writes only the rounds field and skips name validation.
+export const saveTournamentRounds = async (
+  id: string,
+  rounds: TournamentRound[],
+  clientId: string
+): Promise<void> => {
+  const firestore = ensureFirebase();
+
+  try {
+    await updateDoc(doc(firestore, 'tournaments', id), {
+      rounds: sanitizeRounds(rounds),
+      updatedBy: clientId,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    throw toUserError(error, 'Failed to save scores.');
+  }
+};
+
+export const subscribeToTournament = (
+  id: string,
+  onTournament: (tournament: Tournament, updatedBy: string | null) => void,
+  onError: (error: Error) => void
+): Unsubscribe => {
+  const firestore = ensureFirebase();
+
+  return onSnapshot(
+    doc(firestore, 'tournaments', id),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        onError(new Error('Tournament not found.'));
+        return;
+      }
+
+      const data = snapshot.data() as TournamentDocument;
+      onTournament(parseDoc(snapshot.id, data), data.updatedBy ?? null);
+    },
+    (error) => {
+      onError(toUserError(error, 'Lost connection to the tournament.'));
+    }
+  );
 };
 
 export const makeEntryId = createEntryId;

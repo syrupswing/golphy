@@ -76,16 +76,53 @@ export interface GameState {
 
 export type TournamentFormat = 'individual' | 'team';
 
+export type PlayerTier = 'A' | 'B';
+
+export type TierAssignmentMode = 'auto' | 'manual';
+
 export interface TournamentEntry {
   id: string;
   name: string;
   playerIds: string[];
+  playerTiers?: Record<string, PlayerTier>;
 }
 
 export interface Tournament {
   id: string;
   name: string;
   format: TournamentFormat;
+  tierMode: TierAssignmentMode;
   entries: TournamentEntry[];
+  rounds: TournamentRound[];
   createdBy?: string;
+}
+
+export type TournamentMatchupFormat =
+  | 'singles'
+  | 'four-ball'
+  | 'foursomes'
+  | 'scramble'
+  | 'stroke';
+
+export interface MatchupSide {
+  entryId: string;
+  playerIds: string[];
+  // One combined score per hole for the whole side.
+  scores: number[];
+}
+
+export interface TournamentMatchup {
+  id: string;
+  format: TournamentMatchupFormat;
+  // Only confirmed games count toward the official leaderboard.
+  confirmed?: boolean;
+  sides: MatchupSide[];
+}
+
+export interface TournamentRound {
+  id: string;
+  name: string;
+  // Round code of the played Golphy round this maps to, when one exists.
+  roundId?: string;
+  matchups: TournamentMatchup[];
 }

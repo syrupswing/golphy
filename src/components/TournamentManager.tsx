@@ -1,20 +1,33 @@
-import { useState } from 'react';
-import type { PlayerProfile, Tournament, TournamentEntry, TournamentFormat } from '../types/index.ts';
-import { makeEntryId } from '../firebase/tournaments';
+import { useEffect, useRef, useState } from 'react';
+import type {
+  PlayerProfile,
+  PlayerTier,
+  TierAssignmentMode,
+  Tournament,
+  TournamentEntry,
+  TournamentFormat,
+  TournamentRound,
+} from '../types/index.ts';
+import {
+  makeEntryId,
+  REQUIRED_TIER_COUNTS,
+  saveTournamentRounds,
+  subscribeToTournament,
+  TEAM_SIZE,
+} from '../firebase/tournaments';
+import type { TournamentInput } from '../firebase/tournaments';
+import TournamentRounds from './TournamentRounds';
 import './TournamentManager.scss';
 
 interface TournamentManagerProps {
   mode: 'add' | 'edit';
   tournaments: Tournament[];
   playerProfiles: PlayerProfile[];
+  playableRounds: Array<{ id: string; alias?: string; scorecardName?: string; totalHoles: number }>;
   isSaving: boolean;
-  onCreate: (name: string, format: TournamentFormat, entries: TournamentEntry[]) => Promise<boolean>;
-  onUpdate: (
-    id: string,
-    name: string,
-    format: TournamentFormat,
-    entries: TournamentEntry[]
-  ) => Promise<boolean>;
+  clientId: string;
+  onCreate: (input: TournamentInput) => Promise<boolean>;
+  onUpdate: (id: string, input: TournamentInput) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
 }
 
@@ -25,13 +38,16 @@ const makeEmptyEntry = (): TournamentEntry => ({
   id: makeEntryId(),
   name: '',
   playerIds: [],
+  playerTiers: {},
 });
 
 export default function TournamentManager({
   mode,
   tournaments,
   playerProfiles,
+  playableRounds,
   isSaving,
+  clientId,
   onCreate,
   onUpdate,
   onDelete,
@@ -39,25 +55,143 @@ export default function TournamentManager({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [format, setFormat] = useState<TournamentFormat>('individual');
+  const [tierMode, setTierMode] = useState<TierAssignmentMode>('auto');
   const [entries, setEntries] = useState<TournamentEntry[]>([makeEmptyEntry()]);
+  const [rounds, setRounds] = useState<TournamentRound[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(mode === 'add');
+  const [scoreSaveState, setScoreSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Rounds arriving from the subscription must not be echoed straight back as a write.
+  const skipNextAutoSaveRef = useRef(true);
+
+  const getHandicap = (playerId: string): number =>
+    playerProfiles.find((profile) => profile.id === playerId)?.handicap ?? Number.MAX_SAFE_INTEGER;
+
+  // The lowest handicaps on a team play as the A players.
+  const assignTiersByHandicap = (playerIds: string[]): Record<string, PlayerTier> => {
+    const ranked = [...playerIds].sort((left, right) => getHandicap(left) - getHandicap(right));
+    const tiers: Record<string, PlayerTier> = {};
+
+    ranked.forEach((playerId, position) => {
+      tiers[playerId] = position < REQUIRED_TIER_COUNTS.A ? 'A' : 'B';
+    });
+
+    return tiers;
+  };
+
+  const countTier = (entry: TournamentEntry, tier: PlayerTier): number =>
+    entry.playerIds.filter((playerId) => entry.playerTiers?.[playerId] === tier).length;
+
+  useEffect(() => {
+    if (!editingId) {
+      return;
+    }
+
+    const unsubscribe = subscribeToTournament(
+      editingId,
+      (tournament, updatedBy) => {
+        if (updatedBy === clientId) {
+          return;
+        }
+
+        skipNextAutoSaveRef.current = true;
+        setRounds(tournament.rounds ?? []);
+      },
+      () => {
+        // A dropped subscription should not block local scoring.
+      }
+    );
+
+    return unsubscribe;
+  }, [editingId, clientId]);
+
+  useEffect(() => {
+    if (!editingId) {
+      return;
+    }
+
+    if (skipNextAutoSaveRef.current) {
+      skipNextAutoSaveRef.current = false;
+      return;
+    }
+
+    setScoreSaveState('saving');
+    const timeout = window.setTimeout(() => {
+      saveTournamentRounds(editingId, rounds, clientId)
+        .then(() => setScoreSaveState('saved'))
+        .catch(() => setScoreSaveState('error'));
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
+  }, [rounds, editingId, clientId]);
+
+  // Manual mode keeps existing picks and only slots newcomers into whichever tier has room.
+  const resolveTiers = (
+    playerIds: string[],
+    existing: Record<string, PlayerTier> = {}
+  ): Record<string, PlayerTier> => {
+    if (tierMode === 'auto') {
+      return assignTiersByHandicap(playerIds);
+    }
+
+    const tiers: Record<string, PlayerTier> = {};
+    let aCount = playerIds.filter((playerId) => existing[playerId] === 'A').length;
+
+    playerIds.forEach((playerId) => {
+      if (existing[playerId]) {
+        tiers[playerId] = existing[playerId];
+        return;
+      }
+
+      if (aCount < REQUIRED_TIER_COUNTS.A) {
+        tiers[playerId] = 'A';
+        aCount += 1;
+      } else {
+        tiers[playerId] = 'B';
+      }
+    });
+
+    return tiers;
+  };
 
   const resetForm = () => {
+    skipNextAutoSaveRef.current = true;
     setEditingId(null);
     setName('');
     setFormat('individual');
+    setTierMode('auto');
     setEntries([makeEmptyEntry()]);
+    setRounds([]);
     setIsFormOpen(mode === 'add');
   };
 
   const openTournamentForEditing = (tournament: Tournament) => {
+    skipNextAutoSaveRef.current = true;
+    setScoreSaveState('idle');
     setEditingId(tournament.id);
     setName(tournament.name);
     setFormat(tournament.format);
+    setTierMode(tournament.tierMode ?? 'auto');
     setEntries(
       tournament.entries.length
-        ? tournament.entries.map((entry) => ({ ...entry, playerIds: [...entry.playerIds] }))
+        ? tournament.entries.map((entry) => ({
+            ...entry,
+            playerIds: [...entry.playerIds],
+            playerTiers: { ...(entry.playerTiers ?? {}) },
+          }))
         : [makeEmptyEntry()]
+    );
+    setRounds(
+      (tournament.rounds ?? []).map((round) => ({
+        ...round,
+        matchups: round.matchups.map((matchup) => ({
+          ...matchup,
+          sides: matchup.sides.map((side) => ({
+            ...side,
+            playerIds: [...side.playerIds],
+            scores: [...side.scores],
+          })),
+        })),
+      }))
     );
     setIsFormOpen(true);
   };
@@ -70,8 +204,31 @@ export default function TournamentManager({
       const playerIds = entries.flatMap((entry) => entry.playerIds);
       setEntries(
         playerIds.length
-          ? playerIds.map((playerId) => ({ id: makeEntryId(), name: '', playerIds: [playerId] }))
+          ? playerIds.map((playerId) => ({
+              id: makeEntryId(),
+              name: '',
+              playerIds: [playerId],
+              playerTiers: {},
+            }))
           : [makeEmptyEntry()]
+      );
+      return;
+    }
+
+    setEntries((prev) =>
+      prev.map((entry) => ({
+        ...entry,
+        playerTiers: resolveTiers(entry.playerIds, entry.playerTiers ?? {}),
+      }))
+    );
+  };
+
+  const handleTierModeChange = (nextMode: TierAssignmentMode) => {
+    setTierMode(nextMode);
+
+    if (nextMode === 'auto') {
+      setEntries((prev) =>
+        prev.map((entry) => ({ ...entry, playerTiers: assignTiersByHandicap(entry.playerIds) }))
       );
     }
   };
@@ -95,27 +252,64 @@ export default function TournamentManager({
       prev.map((entry) => {
         if (entry.id !== entryId) {
           // A player belongs to a single entry, so drop them from any other one.
-          return { ...entry, playerIds: entry.playerIds.filter((id) => id !== playerId) };
+          if (!entry.playerIds.includes(playerId)) {
+            return entry;
+          }
+
+          const playerIds = entry.playerIds.filter((id) => id !== playerId);
+          return {
+            ...entry,
+            playerIds,
+            playerTiers: format === 'team' ? resolveTiers(playerIds, entry.playerTiers ?? {}) : {},
+          };
         }
 
         const isSelected = entry.playerIds.includes(playerId);
+        let playerIds: string[];
+
         if (isSelected) {
-          return { ...entry, playerIds: entry.playerIds.filter((id) => id !== playerId) };
+          playerIds = entry.playerIds.filter((id) => id !== playerId);
+        } else if (format === 'individual') {
+          playerIds = [playerId];
+        } else if (entry.playerIds.length >= TEAM_SIZE) {
+          return entry;
+        } else {
+          playerIds = [...entry.playerIds, playerId];
         }
 
         return {
           ...entry,
-          playerIds: format === 'individual' ? [playerId] : [...entry.playerIds, playerId],
+          playerIds,
+          playerTiers: format === 'team' ? resolveTiers(playerIds, entry.playerTiers ?? {}) : {},
         };
       })
     );
   };
 
+  const setPlayerTier = (entryId: string, playerId: string, tier: PlayerTier) => {
+    setEntries((prev) =>
+      prev.map((entry) =>
+        entry.id === entryId
+          ? { ...entry, playerTiers: { ...(entry.playerTiers ?? {}), [playerId]: tier } }
+          : entry
+      )
+    );
+  };
+
+  const autoAssignTiers = (entryId: string) => {
+    setEntries((prev) =>
+      prev.map((entry) =>
+        entry.id === entryId
+          ? { ...entry, playerTiers: assignTiersByHandicap(entry.playerIds) }
+          : entry
+      )
+    );
+  };
+
   const handleSave = async () => {
+    const input: TournamentInput = { name, format, tierMode, entries, rounds };
     const saved =
-      editingId !== null
-        ? await onUpdate(editingId, name, format, entries)
-        : await onCreate(name, format, entries);
+      editingId !== null ? await onUpdate(editingId, input) : await onCreate(input);
 
     if (saved) {
       resetForm();
@@ -197,6 +391,28 @@ export default function TournamentManager({
           <div className="tournament-field">
             <label>{format === 'team' ? 'Teams' : 'Players'}</label>
 
+            {format === 'team' && (
+              <div className="tournament-tier-mode">
+                <span>A and B players</span>
+                <div className="tournament-format-toggle">
+                  <button
+                    type="button"
+                    className={tierMode === 'auto' ? 'active' : ''}
+                    onClick={() => handleTierModeChange('auto')}
+                  >
+                    By handicap
+                  </button>
+                  <button
+                    type="button"
+                    className={tierMode === 'manual' ? 'active' : ''}
+                    onClick={() => handleTierModeChange('manual')}
+                  >
+                    Manual
+                  </button>
+                </div>
+              </div>
+            )}
+
             {playerProfiles.length === 0 && (
               <p className="tournament-empty">Add player profiles first, then build your entries.</p>
             )}
@@ -231,6 +447,7 @@ export default function TournamentManager({
                 <div className="tournament-player-options">
                   {playerProfiles.map((profile) => {
                     const isSelected = entry.playerIds.includes(profile.id);
+                    const isTeamFull = format === 'team' && entry.playerIds.length >= TEAM_SIZE;
 
                     return (
                       <button
@@ -238,12 +455,66 @@ export default function TournamentManager({
                         type="button"
                         className={`tournament-player-chip${isSelected ? ' selected' : ''}`}
                         onClick={() => togglePlayerInEntry(entry.id, profile.id)}
+                        disabled={!isSelected && isTeamFull}
                       >
                         {getPlayerName(profile)}
+                        <span className="tournament-player-hcp">{profile.handicap}</span>
                       </button>
                     );
                   })}
                 </div>
+
+                {format === 'team' && entry.playerIds.length > 0 && (
+                  <div className="tournament-tiers">
+                    <div className="tournament-tier-summary">
+                      <span
+                        className={
+                          countTier(entry, 'A') === REQUIRED_TIER_COUNTS.A ? 'is-met' : 'is-short'
+                        }
+                      >
+                        A {countTier(entry, 'A')}/{REQUIRED_TIER_COUNTS.A}
+                      </span>
+                      <span
+                        className={
+                          countTier(entry, 'B') === REQUIRED_TIER_COUNTS.B ? 'is-met' : 'is-short'
+                        }
+                      >
+                        B {countTier(entry, 'B')}/{REQUIRED_TIER_COUNTS.B}
+                      </span>
+                      <button type="button" onClick={() => autoAssignTiers(entry.id)}>
+                        Auto-assign by handicap
+                      </button>                    </div>
+
+                    {[...entry.playerIds]
+                      .sort((left, right) => getHandicap(left) - getHandicap(right))
+                      .map((playerId) => {
+                        const profile = playerProfiles.find((p) => p.id === playerId);
+                        const tier = entry.playerTiers?.[playerId] ?? 'B';
+
+                        return (
+                          <div key={playerId} className="tournament-tier-row">
+                            <span className="tournament-tier-name">
+                              {profile ? getPlayerName(profile) : 'Unknown player'}
+                              <span className="tournament-player-hcp">{profile?.handicap ?? '—'}</span>
+                            </span>
+                            <div className="tournament-tier-toggle">
+                              {(['A', 'B'] as PlayerTier[]).map((option) => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  className={tier === option ? 'active' : ''}
+                                  onClick={() => setPlayerTier(entry.id, playerId, option)}
+                                  aria-label={`Set ${profile ? getPlayerName(profile) : 'player'} as ${option} player`}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
               </div>
             ))}
 
@@ -251,6 +522,26 @@ export default function TournamentManager({
               {format === 'team' ? 'Add team' : 'Add player'}
             </button>
           </div>
+
+          <TournamentRounds
+            entries={entries}
+            rounds={rounds}
+            playerProfiles={playerProfiles}
+            playableRounds={playableRounds}
+            onChange={setRounds}
+          />
+
+          {editingId && (
+            <p className={`tournament-save-state is-${scoreSaveState}`}>
+              {scoreSaveState === 'saving'
+                ? 'Saving scores...'
+                : scoreSaveState === 'saved'
+                  ? 'Scores saved'
+                  : scoreSaveState === 'error'
+                    ? 'Could not save scores. Check your connection.'
+                    : 'Scores save automatically'}
+            </p>
+          )}
 
           <div className="tournament-actions">
             <button
