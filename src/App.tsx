@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Player, PlayerProfile, Score, GameState, Scorecard, NineHoleSet } from './types/index.ts'
+import type { Player, PlayerProfile, Score, GameState, Scorecard, NineHoleSet, HoleInfo, StrokeIndexAllocation, Tournament, TournamentEntry, TournamentFormat } from './types/index.ts'
 import ScoreTable from './components/ScoreTable'
 import ScorecardSelector from './components/ScorecardSelector'
+import TournamentManager from './components/TournamentManager'
 import { isFirebaseConfigured } from './firebase/config'
 import {
   createRound,
@@ -13,6 +14,12 @@ import {
 } from './firebase/rounds'
 import { createScorecard, listScorecards, updateScorecard } from './firebase/scorecards'
 import { createPlayer, deletePlayer, listPlayers, updatePlayer } from './firebase/players'
+import {
+  createTournament,
+  deleteTournament,
+  listTournaments,
+  updateTournament,
+} from './firebase/tournaments'
 import './styles/App.scss'
 import golphyBanner from './assets/Golphy-banner.svg'
 
@@ -44,6 +51,7 @@ interface PersistedAppSession {
   sharedRoundId: string | null;
   selectedJoinRoundId: string;
   selectedScorecard: Scorecard | null;
+  selectedSetIndexes: number[];
 }
 
 const createClientId = (): string => {
@@ -101,8 +109,14 @@ function App() {
   const [shareNotice, setShareNotice] = useState('');
   const [scorecards, setScorecards] = useState<Scorecard[]>([]);
   const [selectedScorecard, setSelectedScorecard] = useState<Scorecard | null>(null);
+  const [selectedSetIndexes, setSelectedSetIndexes] = useState<number[]>([]);
   const [isCreatingScorecard, setIsCreatingScorecard] = useState(false);
   const [coursePanelMode, setCoursePanelMode] = useState<'closed' | 'add' | 'edit'>('closed');
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [tournamentPanelMode, setTournamentPanelMode] = useState<'closed' | 'add' | 'edit'>('closed');
+  const [isSavingTournament, setIsSavingTournament] = useState(false);
+  const [tournamentError, setTournamentError] = useState('');
+  const [tournamentNotice, setTournamentNotice] = useState('');
   const [homeCourseSelection, setHomeCourseSelection] = useState<Scorecard | null>(null);
   const [showRoundInfoPopover, setShowRoundInfoPopover] = useState(false);
   const [availableRounds, setAvailableRounds] = useState<Array<{
@@ -181,6 +195,10 @@ function App() {
       if (session.selectedScorecard) {
         setSelectedScorecard(session.selectedScorecard);
       }
+
+      if (Array.isArray(session.selectedSetIndexes)) {
+        setSelectedSetIndexes(session.selectedSetIndexes);
+      }
     } catch {
       window.localStorage.removeItem(APP_SESSION_STORAGE_KEY);
     } finally {
@@ -249,9 +267,87 @@ function App() {
     }
   };
 
+  const refreshTournaments = async () => {
+    if (!isFirebaseConfigured) {
+      return;
+    }
+
+    try {
+      setTournaments(await listTournaments());
+    } catch (error) {
+      setTournamentError(error instanceof Error ? error.message : 'Failed to load tournaments.');
+    }
+  };
+
+  const openTournamentPanel = (nextMode: 'add' | 'edit') => {
+    setTournamentPanelMode(nextMode);
+    setTournamentError('');
+    setTournamentNotice('');
+    void refreshPlayerProfiles();
+    void refreshTournaments();
+  };
+
+  const saveTournament = async (
+    action: () => Promise<Tournament>,
+    successMessage: string
+  ): Promise<boolean> => {
+    if (!isFirebaseConfigured) {
+      setTournamentError('Firebase is not configured. Add VITE_FIREBASE_* values in .env.local first.');
+      return false;
+    }
+
+    setIsSavingTournament(true);
+    setTournamentError('');
+    setTournamentNotice('');
+
+    try {
+      await action();
+      await refreshTournaments();
+      setTournamentNotice(successMessage);
+      return true;
+    } catch (error) {
+      setTournamentError(error instanceof Error ? error.message : 'Failed to save tournament.');
+      return false;
+    } finally {
+      setIsSavingTournament(false);
+    }
+  };
+
+  const handleCreateTournament = (
+    name: string,
+    format: TournamentFormat,
+    entries: TournamentEntry[]
+  ) => saveTournament(() => createTournament({ name, format, entries }, clientId), 'Tournament created.');
+
+  const handleUpdateTournament = (
+    id: string,
+    name: string,
+    format: TournamentFormat,
+    entries: TournamentEntry[]
+  ) => saveTournament(() => updateTournament(id, { name, format, entries }), 'Tournament updated.');
+
+  const handleDeleteTournament = async (id: string): Promise<boolean> => {
+    setIsSavingTournament(true);
+    setTournamentError('');
+    setTournamentNotice('');
+
+    try {
+      await deleteTournament(id);
+      await refreshTournaments();
+      setTournamentNotice('Tournament deleted.');
+      return true;
+    } catch (error) {
+      setTournamentError(error instanceof Error ? error.message : 'Failed to delete tournament.');
+      return false;
+    } finally {
+      setIsSavingTournament(false);
+    }
+  };
+
   useEffect(() => {
     if (!isFirebaseConfigured) return;
     void refreshPlayerProfiles();
+    void refreshTournaments();
   }, []);
 
   useEffect(() => {
@@ -344,6 +440,7 @@ function App() {
       sharedRoundId,
       selectedJoinRoundId,
       selectedScorecard,
+      selectedSetIndexes,
     };
 
     window.localStorage.setItem(APP_SESSION_STORAGE_KEY, JSON.stringify(sessionToPersist));
@@ -357,6 +454,7 @@ function App() {
     roundAlias,
     selectedJoinRoundId,
     selectedScorecard,
+    selectedSetIndexes,
     sharedRoundId,
     totalHoles,
     view,
@@ -423,20 +521,81 @@ function App() {
     };
   };
 
-  const buildPlayedSetLabels = () => {
-    if (selectedScorecard?.sets?.length) {
-      const availableSetCount = selectedScorecard.sets.length;
-      const setsToUse = Math.min(Math.ceil(totalHoles / 9), availableSetCount);
+  const getPlayedSets = (): NineHoleSet[] => {
+    const sets = selectedScorecard?.sets;
+    if (!sets?.length) {
+      return [];
+    }
 
-      return selectedScorecard.sets.slice(0, setsToUse).map((set, index) => {
+    const indexes = selectedSetIndexes.length ? selectedSetIndexes : sets.map((_, index) => index);
+    return indexes.filter((index) => index < sets.length).map((index) => sets[index]);
+  };
+
+  const getPlayOrder = (): number[] => {
+    const sets = selectedScorecard?.sets;
+    if (!sets?.length) {
+      return [];
+    }
+
+    const indexes = selectedSetIndexes.length ? selectedSetIndexes : sets.map((_, index) => index);
+    return indexes.filter((index) => index < sets.length);
+  };
+
+  const moveSetInPlayOrder = (position: number, direction: -1 | 1) => {
+    const target = position + direction;
+    if (target < 0 || target >= selectedSetIndexes.length) {
+      return;
+    }
+
+    const next = [...selectedSetIndexes];
+    [next[position], next[target]] = [next[target], next[position]];
+    setSelectedSetIndexes(next);
+  };
+
+  // Courses publish a separate stroke index order for each pairing of nines.
+  const getStrokeIndexAllocation = (playOrder: number[]): StrokeIndexAllocation | undefined => {
+    const key = [...playOrder].sort((a, b) => a - b).join('-');
+    return selectedScorecard?.strokeIndexAllocations?.find(
+      (allocation) => [...allocation.setIndexes].sort((a, b) => a - b).join('-') === key
+    );
+  };
+
+  const buildPlayedHoleDetails = (): HoleInfo[] => {
+    const sets = selectedScorecard?.sets;
+    if (!sets?.length) {
+      return [];
+    }
+
+    const playOrder = getPlayOrder();
+    const allocation = getStrokeIndexAllocation(playOrder);
+
+    return playOrder.flatMap((setIndex) => {
+      const allocationPosition = allocation?.setIndexes.indexOf(setIndex) ?? -1;
+      const overrides =
+        allocationPosition >= 0 ? allocation?.handicapsBySet[allocationPosition] : undefined;
+
+      return sets[setIndex].holes.map((hole, holeIndex) => {
+        const override = overrides?.[holeIndex];
+        return Number.isFinite(override) && (override as number) > 0
+          ? { ...hole, handicap: override as number }
+          : { ...hole };
+      });
+    });
+  };
+
+  const buildPlayedSetLabels = () => {
+    const playedSets = getPlayedSets();
+
+    if (playedSets.length) {
+      return playedSets.map((set, position) => {
         const alias = set.alias?.trim();
         if (alias) {
           return alias;
         }
 
-        const startHole = index * 9 + 1;
+        const startHole = position * 9 + 1;
         const endHole = Math.min(startHole + 8, totalHoles);
-        return `Set ${index + 1} (${startHole}-${endHole})`;
+        return `Set ${position + 1} (${startHole}-${endHole})`;
       });
     }
 
@@ -779,16 +938,38 @@ function App() {
   const handleScorecardSelect = (sc: Scorecard | null) => {
     setSelectedScorecard(sc);
     if (sc) {
-      setTotalHoles(sc.sets.length * 9);
+      const allSetIndexes = sc.sets.map((_, index) => index);
+      setSelectedSetIndexes(allSetIndexes);
+      setTotalHoles(allSetIndexes.length * 9);
+    } else {
+      setSelectedSetIndexes([]);
     }
   };
 
-  const handleCreateScorecard = async (name: string, sets: NineHoleSet[]) => {
+  const toggleSetSelection = (setIndex: number) => {
+    const next = selectedSetIndexes.includes(setIndex)
+      ? selectedSetIndexes.filter((index) => index !== setIndex)
+      : [...selectedSetIndexes, setIndex];
+
+    // A round needs at least one set of nine.
+    if (next.length === 0) {
+      return;
+    }
+
+    setSelectedSetIndexes(next);
+    setTotalHoles(next.length * 9);
+  };
+
+  const handleCreateScorecard = async (    name: string,
+    sets: NineHoleSet[],
+    allocations: StrokeIndexAllocation[]
+  ) => {
     setIsCreatingScorecard(true);
     try {
-      const created = await createScorecard(name, sets, clientId);
+      const created = await createScorecard(name, sets, allocations, clientId);
       setScorecards((prev) => [...prev, created]);
       setSelectedScorecard(created);
+      setSelectedSetIndexes(created.sets.map((_, index) => index));
       setTotalHoles(created.sets.length * 9);
       setCoursePanelMode('closed');
     } finally {
@@ -796,20 +977,26 @@ function App() {
     }
   };
 
-  const handleUpdateScorecard = async (id: string, name: string, sets: NineHoleSet[]) => {
+  const handleUpdateScorecard = async (
+    id: string,
+    name: string,
+    sets: NineHoleSet[],
+    allocations: StrokeIndexAllocation[]
+  ) => {
     setIsCreatingScorecard(true);
     try {
-      const savedSets = await updateScorecard(id, name, sets);
-      setScorecards((prev) =>
-        prev.map((sc) => (sc.id === id ? { ...sc, name: name.trim(), sets: savedSets } : sc))
-      );
-      setSelectedScorecard((prev) =>
-        prev?.id === id ? { ...prev, name: name.trim(), sets: savedSets } : prev
-      );
-      setHomeCourseSelection((prev) =>
-        prev?.id === id ? { ...prev, name: name.trim(), sets: savedSets } : prev
-      );
+      const saved = await updateScorecard(id, name, sets, allocations);
+      const savedSets = saved.sets;
+      const patch = {
+        name: name.trim(),
+        sets: savedSets,
+        strokeIndexAllocations: saved.strokeIndexAllocations,
+      };
+      setScorecards((prev) => prev.map((sc) => (sc.id === id ? { ...sc, ...patch } : sc)));
+      setSelectedScorecard((prev) => (prev?.id === id ? { ...prev, ...patch } : prev));
+      setHomeCourseSelection((prev) => (prev?.id === id ? { ...prev, ...patch } : prev));
       if (selectedScorecard?.id === id) {
+        setSelectedSetIndexes(savedSets.map((_, index) => index));
         setTotalHoles(savedSets.length * 9);
       }
       setCoursePanelMode('closed');
@@ -819,8 +1006,8 @@ function App() {
   };
 
   const buildInitialRoundState = (): GameState => {
-    const holeDetails = selectedScorecard?.sets.flatMap((set) => set.holes);
-    const parValues = holeDetails?.map((hole) => hole.par);
+    const holeDetails = buildPlayedHoleDetails();
+    const parValues = holeDetails.map((hole) => hole.par);
 
     return {
       ...gameState,
@@ -902,6 +1089,7 @@ function App() {
     setSyncError('');
     setShareNotice('');
     setSelectedScorecard(null);
+    setSelectedSetIndexes([]);
     setPlayerProfileError('');
     setPlayerProfileNotice('');
     setCreatedPlayerSummary(null);
@@ -1397,6 +1585,7 @@ function App() {
                       onUpdate={handleUpdateScorecard}
                       isSaving={isCreatingScorecard}
                       showOptions={coursePanelMode === 'edit'}
+                      allowBlankCourse={false}
                       initialFormMode={coursePanelMode === 'add' ? 'create' : 'closed'}
                     />
                     <button
@@ -1405,6 +1594,49 @@ function App() {
                       onClick={() => setCoursePanelMode('closed')}
                     >
                       Cancel
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="quick-course-panel">
+                <h3>Tournaments</h3>
+                {tournamentPanelMode === 'closed' ? (
+                  <div className="player-action-row">
+                    <button
+                      type="button"
+                      className="reveal-player-btn"
+                      onClick={() => openTournamentPanel('add')}
+                    >
+                      Add new
+                    </button>
+                    <button
+                      type="button"
+                      className="reveal-player-btn secondary"
+                      onClick={() => openTournamentPanel('edit')}
+                    >
+                      Edit existing
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <TournamentManager
+                      mode={tournamentPanelMode}
+                      tournaments={tournaments}
+                      playerProfiles={playerProfiles}
+                      isSaving={isSavingTournament}
+                      onCreate={handleCreateTournament}
+                      onUpdate={handleUpdateTournament}
+                      onDelete={handleDeleteTournament}
+                    />
+                    {tournamentNotice && <p className="share-notice">{tournamentNotice}</p>}
+                    {tournamentError && <p className="sync-error">{tournamentError}</p>}
+                    <button
+                      type="button"
+                      className="collapse-player-btn"
+                      onClick={() => setTournamentPanelMode('closed')}
+                    >
+                      Close
                     </button>
                   </>
                 )}
@@ -1479,6 +1711,63 @@ function App() {
                 />
               </div>
 
+              {selectedScorecard && selectedScorecard.sets.length > 1 && (
+                <div className="input-group">
+                  <label>Which nines are you playing?</label>
+                  <div className="set-picker-list">
+                    {selectedScorecard.sets.map((set, index) => {
+                      const playPosition = selectedSetIndexes.indexOf(index);
+                      const isChecked = playPosition >= 0;
+                      const startHole = playPosition * 9 + 1;
+
+                      return (
+                        <div key={index} className={`set-picker-item${isChecked ? ' selected' : ''}`}>
+                          <label className="set-picker-label">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleSetSelection(index)}
+                            />
+                            <span className="set-picker-text">
+                              <span className="set-picker-name">
+                                {set.alias?.trim() || `Set ${index + 1}`}
+                              </span>
+                              <span className="set-picker-meta">
+                                {isChecked ? `Plays as holes ${startHole}-${startHole + 8}` : 'Not in this round'}
+                              </span>
+                            </span>
+                          </label>
+
+                          {isChecked && selectedSetIndexes.length > 1 && (
+                            <div className="set-picker-order">
+                              <button
+                                type="button"
+                                onClick={() => moveSetInPlayOrder(playPosition, -1)}
+                                disabled={playPosition === 0}
+                                aria-label={`Move ${set.alias?.trim() || `Set ${index + 1}`} earlier`}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => moveSetInPlayOrder(playPosition, 1)}
+                                disabled={playPosition === selectedSetIndexes.length - 1}
+                                aria-label={`Move ${set.alias?.trim() || `Set ${index + 1}`} later`}
+                              >
+                                ↓
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {getStrokeIndexAllocation(getPlayOrder()) && (
+                    <p className="sync-note">Using this combination's published stroke indexes.</p>
+                  )}
+                </div>
+              )}
+
               {!selectedScorecard && (
                 <div className="input-group">
                   <label>Round length</label>
@@ -1518,7 +1807,7 @@ function App() {
               </div>
 
               <div className="course-summary">
-                <strong>{selectedScorecard?.name || 'No saved course selected'}</strong>
+                <strong>{selectedScorecard?.name || 'Blank default course'}</strong>
                 <span>{totalHoles} holes</span>
               </div>
 

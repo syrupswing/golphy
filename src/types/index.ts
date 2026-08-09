@@ -22,10 +22,17 @@ export interface NineHoleSet {
   holes: HoleInfo[];
 }
 
+// Courses often publish a different stroke index order for each pairing of nines.
+export interface StrokeIndexAllocation {
+  setIndexes: number[];
+  handicapsBySet: number[][];
+}
+
 export interface Scorecard {
   id: string;
   name: string;
   sets: NineHoleSet[];
+  strokeIndexAllocations?: StrokeIndexAllocation[];
   createdBy?: string;
   isPublic?: boolean;
 }
@@ -65,4 +72,20 @@ export interface GameState {
   scorecardName?: string;
   playedSetLabels?: string[];
   matchup?: MatchupConfig;
+}
+
+export type TournamentFormat = 'individual' | 'team';
+
+export interface TournamentEntry {
+  id: string;
+  name: string;
+  playerIds: string[];
+}
+
+export interface Tournament {
+  id: string;
+  name: string;
+  format: TournamentFormat;
+  entries: TournamentEntry[];
+  createdBy?: string;
 }

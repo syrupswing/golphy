@@ -17,7 +17,10 @@
 .table-wrapper {
   box-shadow: $shadow-md;
   border-radius: $border-radius-lg;
-  overflow: auto;
+  // Only horizontal scrolling is wanted; on platforms with space-taking scrollbars the
+  // horizontal bar would otherwise shrink this auto-height box into vertical overflow.
+  overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
   /* prevent table from blowing out the card on narrow screens */
@@ -409,8 +412,14 @@
           width: 100%;
           height: 100%;
           cursor: pointer;
+          // Centring via flex keeps the oversized script glyphs off the text baseline,
+          // which would otherwise push them past the cell and create phantom scroll height.
+          display: flex;
+          align-items: center;
+          justify-content: center;
           font-family: 'Nanum Brush Script', cursive;
           font-size: 40px;
+          line-height: 1;
           text-align: center;
           border: none;
           background: transparent;

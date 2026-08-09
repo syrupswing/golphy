@@ -216,6 +216,119 @@
     }
   }
 
+  .allocation-section {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+    padding-top: $spacing-sm;
+    border-top: 1px solid color.adjust($light-color, $lightness: -10%);
+  }
+
+  .allocation-title {
+    margin: 0;
+    font-size: $font-sm;
+    font-weight: 700;
+    color: $dark-color;
+  }
+
+  .allocation-copy {
+    margin: 0;
+    font-size: $font-xs;
+    color: $gray;
+  }
+
+  .allocation-block {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+    padding: $spacing-sm;
+    border-radius: $border-radius-sm;
+    background: $white;
+    border: 1px solid color.adjust($light-color, $lightness: -10%);
+  }
+
+  .allocation-sets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-xs;
+  }
+
+  .allocation-set-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: $light-color;
+    border: 1px solid transparent;
+    font-size: $font-xs;
+    font-weight: 600;
+    cursor: pointer;
+
+    &.selected {
+      border-color: $primary-color;
+      background: color.adjust($primary-color, $lightness: 38%);
+    }
+
+    input[type='checkbox'] {
+      width: 14px;
+      height: 14px;
+      accent-color: $primary-color;
+    }
+  }
+
+  .allocation-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .allocation-row-label {
+    font-size: $font-xs;
+    font-weight: 700;
+    color: $gray;
+  }
+
+  .allocation-inputs {
+    display: grid;
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+    gap: 4px;
+
+    input {
+      width: 100%;
+      min-width: 0;
+      padding: 6px 2px;
+      text-align: center;
+      border-radius: $border-radius-sm;
+      border: 1px solid color.adjust($light-color, $lightness: -12%);
+      font-size: $font-xs;
+      appearance: textfield;
+
+      &::-webkit-outer-spin-button,
+      &::-webkit-inner-spin-button {
+        appearance: none;
+        margin: 0;
+      }
+    }
+  }
+
+  .allocation-add-btn,
+  .allocation-remove-btn {
+    align-self: flex-start;
+    padding: 6px 12px;
+    border-radius: $border-radius-sm;
+    font-size: $font-xs;
+    font-weight: 600;
+    background: $light-color;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+    color: $dark-color;
+  }
+
+  .allocation-remove-btn {
+    color: $danger-color;
+    border-color: color.adjust($danger-color, $lightness: 24%);
+  }
+
   .create-error {
     color: $danger-color;
     font-size: $font-sm;

@@ -1,15 +1,21 @@
 import { useState } from 'react';
-import type { HoleInfo, NineHoleSet, Scorecard } from '../types/index.ts';
+import type { HoleInfo, NineHoleSet, Scorecard, StrokeIndexAllocation } from '../types/index.ts';
 import './ScorecardSelector.scss';
 
 interface ScorecardSelectorProps {
   scorecards: Scorecard[];
   selectedId: string | null;
   onSelect: (scorecard: Scorecard | null) => void;
-  onCreate: (name: string, sets: NineHoleSet[]) => Promise<void>;
-  onUpdate: (id: string, name: string, sets: NineHoleSet[]) => Promise<void>;
+  onCreate: (name: string, sets: NineHoleSet[], allocations: StrokeIndexAllocation[]) => Promise<void>;
+  onUpdate: (
+    id: string,
+    name: string,
+    sets: NineHoleSet[],
+    allocations: StrokeIndexAllocation[]
+  ) => Promise<void>;
   isSaving: boolean;
   showOptions?: boolean;
+  allowBlankCourse?: boolean;
   initialFormMode?: 'closed' | 'create';
 }
 
@@ -31,6 +37,9 @@ const makeDefaultSets = (totalHoles: number): NineHoleSet[] => {
   }));
 };
 
+const getSetLabel = (set: NineHoleSet | undefined, index: number) =>
+  set?.alias?.trim() || `Set ${index + 1}`;
+
 export default function ScorecardSelector({
   scorecards,
   selectedId,
@@ -39,6 +48,7 @@ export default function ScorecardSelector({
   onUpdate,
   isSaving,
   showOptions = true,
+  allowBlankCourse = true,
   initialFormMode = 'closed',
 }: ScorecardSelectorProps) {
   const [formMode, setFormMode] = useState<'closed' | 'create' | 'edit'>(initialFormMode);
@@ -46,6 +56,7 @@ export default function ScorecardSelector({
   const [newName, setNewName] = useState('');
   const [totalHoles, setTotalHoles] = useState<9 | 18 | 27>(18);
   const [sets, setSets] = useState<NineHoleSet[]>(makeDefaultSets(18));
+  const [allocations, setAllocations] = useState<StrokeIndexAllocation[]>([]);
   const [createError, setCreateError] = useState('');
 
   const selectedScorecard = scorecards.find((sc) => sc.id === selectedId) ?? null;
@@ -56,6 +67,7 @@ export default function ScorecardSelector({
     setNewName('');
     setTotalHoles(18);
     setSets(makeDefaultSets(18));
+    setAllocations([]);
     setCreateError('');
   };
 
@@ -69,6 +81,7 @@ export default function ScorecardSelector({
     setNewName('');
     setTotalHoles(18);
     setSets(makeDefaultSets(18));
+    setAllocations([]);
     setCreateError('');
   };
 
@@ -86,6 +99,12 @@ export default function ScorecardSelector({
       selectedScorecard.sets.map((set) => ({
         alias: set.alias,
         holes: set.holes.map((hole) => ({ ...hole })),
+      }))
+    );
+    setAllocations(
+      (selectedScorecard.strokeIndexAllocations ?? []).map((allocation) => ({
+        setIndexes: [...allocation.setIndexes],
+        handicapsBySet: allocation.handicapsBySet.map((values) => [...values]),
       }))
     );
     setCreateError('');
@@ -127,6 +146,72 @@ export default function ScorecardSelector({
     );
   };
 
+  const addAllocation = () => {
+    const setIndexes = sets.length > 1 ? [0, 1] : [0];
+    setAllocations((prev) => [
+      ...prev,
+      {
+        setIndexes,
+        handicapsBySet: setIndexes.map(() => Array(9).fill(0)),
+      },
+    ]);
+  };
+
+  const removeAllocation = (allocationIndex: number) => {
+    setAllocations((prev) => prev.filter((_, index) => index !== allocationIndex));
+  };
+
+  const toggleAllocationSet = (allocationIndex: number, setIndex: number) => {
+    setAllocations((prev) =>
+      prev.map((allocation, index) => {
+        if (index !== allocationIndex) return allocation;
+
+        const isIncluded = allocation.setIndexes.includes(setIndex);
+        if (isIncluded && allocation.setIndexes.length <= 2) {
+          return allocation;
+        }
+
+        const nextSetIndexes = isIncluded
+          ? allocation.setIndexes.filter((value) => value !== setIndex)
+          : [...allocation.setIndexes, setIndex].sort((a, b) => a - b);
+
+        return {
+          setIndexes: nextSetIndexes,
+          handicapsBySet: nextSetIndexes.map((value) => {
+            const previousPosition = allocation.setIndexes.indexOf(value);
+            return previousPosition >= 0
+              ? [...allocation.handicapsBySet[previousPosition]]
+              : Array(9).fill(0);
+          }),
+        };
+      })
+    );
+  };
+
+  const handleAllocationCellChange = (
+    allocationIndex: number,
+    position: number,
+    holeIndex: number,
+    value: string
+  ) => {
+    const parsed = value === '' ? 0 : parseInt(value);
+    if (isNaN(parsed)) return;
+
+    setAllocations((prev) =>
+      prev.map((allocation, index) => {
+        if (index !== allocationIndex) return allocation;
+        return {
+          ...allocation,
+          handicapsBySet: allocation.handicapsBySet.map((values, valuesPosition) =>
+            valuesPosition === position
+              ? values.map((existing, i) => (i === holeIndex ? parsed : existing))
+              : values
+          ),
+        };
+      })
+    );
+  };
+
   const handleSave = async () => {
     if (!newName.trim()) {
       setCreateError('Enter a course name.');
@@ -135,9 +220,9 @@ export default function ScorecardSelector({
     setCreateError('');
 
     if (formMode === 'edit' && editingId) {
-      await onUpdate(editingId, newName.trim(), sets);
+      await onUpdate(editingId, newName.trim(), sets, allocations);
     } else {
-      await onCreate(newName.trim(), sets);
+      await onCreate(newName.trim(), sets, allocations);
     }
 
     closeForm();
@@ -147,14 +232,16 @@ export default function ScorecardSelector({
     <div className="scorecard-selector">
       {showOptions && (
         <div className="scorecard-options">
-          <button
-            type="button"
-            className={`scorecard-option ${selectedId === null ? 'selected' : ''}`}
-            onClick={() => onSelect(null)}
-          >
-            No saved course
-            <span className="scorecard-holes">Use default par values</span>
-          </button>
+          {allowBlankCourse && (
+            <button
+              type="button"
+              className={`scorecard-option ${selectedId === null ? 'selected' : ''}`}
+              onClick={() => onSelect(null)}
+            >
+              Blank default course
+              <span className="scorecard-holes">Use default par values</span>
+            </button>
+          )}
           {scorecards.map((sc) => (
             <button
               key={sc.id}
@@ -290,6 +377,82 @@ export default function ScorecardSelector({
               </div>
             );
           })}
+
+          {sets.length > 1 && (
+            <div className="allocation-section">
+              <p className="allocation-title">Stroke index allocations</p>
+              <p className="allocation-copy">
+                Optional. Add one when a combination of nines uses different stroke indexes than the
+                HCP values above.
+              </p>
+
+              {allocations.map((allocation, allocationIndex) => (
+                <div key={allocationIndex} className="allocation-block">
+                  <div className="allocation-sets">
+                    {sets.map((set, setIndex) => {
+                      const isIncluded = allocation.setIndexes.includes(setIndex);
+
+                      return (
+                        <label
+                          key={setIndex}
+                          className={`allocation-set-toggle${isIncluded ? ' selected' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isIncluded}
+                            onChange={() => toggleAllocationSet(allocationIndex, setIndex)}
+                          />
+                          {getSetLabel(set, setIndex)}
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {allocation.setIndexes.map((setIndex, position) => (
+                    <div key={setIndex} className="allocation-row">
+                      <span className="allocation-row-label">
+                        {getSetLabel(sets[setIndex], setIndex)}
+                      </span>
+                      <div className="allocation-inputs">
+                        {Array.from({ length: 9 }, (_, holeIndex) => (
+                          <input
+                            key={holeIndex}
+                            type="number"
+                            inputMode="numeric"
+                            aria-label={`${getSetLabel(sets[setIndex], setIndex)} hole ${holeIndex + 1} stroke index`}
+                            value={allocation.handicapsBySet[position]?.[holeIndex] || ''}
+                            onChange={(e) =>
+                              handleAllocationCellChange(
+                                allocationIndex,
+                                position,
+                                holeIndex,
+                                e.target.value
+                              )
+                            }
+                            placeholder="—"
+                            min={1}
+                            max={allocation.setIndexes.length * 9}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    className="allocation-remove-btn"
+                    onClick={() => removeAllocation(allocationIndex)}
+                  >
+                    Remove allocation
+                  </button>
+                </div>
+              ))}
+
+              <button type="button" className="allocation-add-btn" onClick={addAllocation}>
+                Add allocation
+              </button>
+            </div>
+          )}
 
           {createError && <p className="create-error">{createError}</p>}
 

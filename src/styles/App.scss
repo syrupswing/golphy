@@ -306,6 +306,84 @@
       color: $gray;
     }
 
+  .set-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+  }
+
+  .set-picker-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    width: 100%;
+    padding: $spacing-sm $spacing-md;
+    border-radius: $border-radius-md;
+    background: $light-color;
+    border: 2px solid transparent;
+
+    &.selected {
+      border-color: $primary-color;
+      background: color.adjust($primary-color, $lightness: 38%);
+    }
+  }
+
+  .set-picker-label {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+
+    input[type='checkbox'] {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+      accent-color: $primary-color;
+    }
+  }
+
+  .set-picker-order {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+
+    button {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border-radius: $border-radius-sm;
+      background: $white;
+      border: 1px solid color.adjust($light-color, $lightness: -12%);
+      color: $dark-color;
+      font-weight: 700;
+      line-height: 1;
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  .set-picker-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .set-picker-name {
+    font-weight: 700;
+    color: $dark-color;
+  }
+
+  .set-picker-meta {
+    font-size: $font-xs;
+    color: $gray;
+  }
+
   .selected-player-summary {
     display: flex;
     flex-direction: column;
