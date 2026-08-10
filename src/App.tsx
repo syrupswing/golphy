@@ -4,6 +4,7 @@ import type {
   PlayerProfile,
   Score,
   GameState,
+  MatchupConfig,
   Scorecard,
   NineHoleSet,
   HoleInfo,
@@ -749,7 +750,7 @@ function App() {
     setGameState((prev) => updater(prev));
   };
 
-  const buildMatchupConfig = (players: Player[]) => {
+  const buildMatchupConfig = (players: Player[]): MatchupConfig | undefined => {
     if (!competitionDefinition.hasTeams) {
       return undefined;
     }

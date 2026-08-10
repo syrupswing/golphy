@@ -392,10 +392,12 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
       return null;
     }
 
+    const handicapRule = matchup.handicapRule;
+
     const resolveSideDetails = (playerIds: string[]) => {
       const rankedPlayers = playerIds
         .map((id) => players.find((player) => player.id === id))
-        .filter((player): player is Player => Boolean(player) && Number.isFinite(player.handicap))
+        .filter((player): player is Player => player !== undefined && Number.isFinite(player.handicap))
         .sort((a, b) => (a.handicap as number) - (b.handicap as number));
 
       if (rankedPlayers.length < 2) {
@@ -406,11 +408,11 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
       const highPlayer = rankedPlayers[1];
       const low = lowPlayer.handicap as number;
       const high = highPlayer.handicap as number;
-      const weightedLow = low * matchup.handicapRule.lowPercentage;
-      const weightedHigh = high * matchup.handicapRule.highPercentage;
+      const weightedLow = low * handicapRule.lowPercentage;
+      const weightedHigh = high * handicapRule.highPercentage;
       const rawTeamHandicap = weightedLow + weightedHigh;
       const proratedTeamHandicap = prorateHandicapByHoles(rawTeamHandicap, totalHoles);
-      const roundedTeamHandicap = applyRoundRule(proratedTeamHandicap, matchup.handicapRule.rounding);
+      const roundedTeamHandicap = applyRoundRule(proratedTeamHandicap, handicapRule.rounding);
 
       return {
         roundedTeamHandicap,
