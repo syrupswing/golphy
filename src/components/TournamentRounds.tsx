@@ -12,6 +12,7 @@ import {
   calculateStandings,
   createEmptyMatchup,
   createSessionWithConfig,
+  getSessionFormatDefinition,
   getSessionFormatLabel,
   getSessionFormatPlayerCount,
   getTournamentSessionFormats,
@@ -40,7 +41,13 @@ export default function TournamentSessionsEditor({
   const formatOptions = getTournamentSessionFormats(sessionFormats);
   const [isSessionFormOpen, setIsSessionFormOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
+  const [lineupRuleError, setLineupRuleError] = useState('');
+  const [autoScheduleError, setAutoScheduleError] = useState('');
+  const [autoScheduleMode, setAutoScheduleMode] = useState<'append' | 'replace'>('append');
   const [newSessionFormat, setNewSessionFormat] = useState<TournamentMatchupFormat>(
+    formatOptions[0]?.id ?? 'singles'
+  );
+  const [autoScheduleFormat, setAutoScheduleFormat] = useState<TournamentMatchupFormat>(
     formatOptions[0]?.id ?? 'singles'
   );
 
@@ -54,6 +61,15 @@ export default function TournamentSessionsEditor({
     const entry = entries.find((e) => e.id === entryId);
     if (!entry) return fallback;
     return entry.name.trim() || getPlayerName(entry.playerIds[0] ?? '');
+  };
+
+  const getSideLimitForFormat = (formatId: TournamentMatchupFormat): number => {
+    const definition = getSessionFormatDefinition(formatId, sessionFormats);
+    if (!definition.hasTeams) {
+      return 1;
+    }
+
+    return getSessionFormatPlayerCount(formatId, sessionFormats);
   };
 
   const updateSession = (sessionId: string, updater: (session: TournamentSession) => TournamentSession) => {
@@ -83,6 +99,115 @@ export default function TournamentSessionsEditor({
     setIsSessionFormOpen(false);
     setNewSessionName('');
     setNewSessionFormat(formatOptions[0]?.id ?? 'singles');
+  };
+
+  const getTierPlayers = (
+    entry: TournamentEntry,
+    tier: 'A' | 'B',
+    neededPlayers: number
+  ): string[] =>
+    entry.playerIds
+      .filter((playerId) => entry.playerTiers?.[playerId] === tier)
+      .slice(0, neededPlayers);
+
+  const generateAbRoundRobinSessions = () => {
+    setAutoScheduleError('');
+
+    if (entries.length !== 4) {
+      setAutoScheduleError('This generator requires exactly 4 teams.');
+      return;
+    }
+
+    const formatDefinition = getSessionFormatDefinition(autoScheduleFormat, sessionFormats);
+    if (!formatDefinition.hasTeams) {
+      setAutoScheduleError('Choose a team format before generating this schedule.');
+      return;
+    }
+
+    if (getSessionFormatPlayerCount(autoScheduleFormat, sessionFormats) !== 2) {
+      setAutoScheduleError('This generator requires a format with 2 players per side.');
+      return;
+    }
+
+    const missingTiers = entries.find((entry) => {
+      const aPlayers = getTierPlayers(entry, 'A', 2);
+      const bPlayers = getTierPlayers(entry, 'B', 2);
+      return aPlayers.length < 2 || bPlayers.length < 2;
+    });
+
+    if (missingTiers) {
+      setAutoScheduleError(
+        `${getEntryName(missingTiers.id, 'A team')} needs 2 A and 2 B players before generating sessions.`
+      );
+      return;
+    }
+
+    if (autoScheduleMode === 'replace' && sessions.length > 0) {
+      const confirmed = window.confirm('Replace existing sessions with a new 3-round A/B schedule?');
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    const pairingsByRound: Array<Array<[number, number]>> = [
+      [
+        [0, 3],
+        [1, 2],
+      ],
+      [
+        [0, 2],
+        [3, 1],
+      ],
+      [
+        [0, 1],
+        [2, 3],
+      ],
+    ];
+
+    const existingCount = autoScheduleMode === 'append' ? sessions.length : 0;
+
+    const generatedSessions = pairingsByRound.map((roundPairings, roundIndex) => {
+      const session = createSessionWithConfig(
+        existingCount + roundIndex,
+        `Round ${roundIndex + 1}`,
+        autoScheduleFormat
+      );
+
+      const matchups: TournamentMatchup[] = [];
+
+      (['A', 'B'] as const).forEach((tier) => {
+        roundPairings.forEach(([leftIndex, rightIndex]) => {
+          const leftEntry = entries[leftIndex];
+          const rightEntry = entries[rightIndex];
+          const leftPlayers = getTierPlayers(leftEntry, tier, 2);
+          const rightPlayers = getTierPlayers(rightEntry, tier, 2);
+
+          const matchup = createEmptyMatchup();
+          matchup.sides[0] = {
+            ...matchup.sides[0],
+            entryId: leftEntry.id,
+            playerIds: leftPlayers,
+          };
+          matchup.sides[1] = {
+            ...matchup.sides[1],
+            entryId: rightEntry.id,
+            playerIds: rightPlayers,
+          };
+          matchups.push(matchup);
+        });
+      });
+
+      return {
+        ...session,
+        matchups,
+      };
+    });
+
+    const nextSessions =
+      autoScheduleMode === 'append' ? [...sessions, ...generatedSessions] : generatedSessions;
+
+    onChange(nextSessions);
+    setLineupRuleError('');
   };
 
   const addSession = () => {
@@ -116,7 +241,7 @@ export default function TournamentSessionsEditor({
         ...matchup,
         sides: matchup.sides.map((side) => ({
           ...side,
-          playerIds: side.playerIds.slice(0, getSessionFormatPlayerCount(format, sessionFormats)),
+          playerIds: side.playerIds.slice(0, getSideLimitForFormat(format)),
         })),
       })),
     }));
@@ -144,7 +269,9 @@ export default function TournamentSessionsEditor({
   ) => {
     updateMatchup(sessionId, matchupId, (matchup) => {
       const session = sessions.find((item) => item.id === sessionId);
-      const limit = getSessionFormatPlayerCount(session?.format ?? 'singles', sessionFormats);
+      const limit = getSideLimitForFormat(session?.format ?? 'singles');
+      const formatDefinition = getSessionFormatDefinition(session?.format ?? 'singles', sessionFormats);
+      const lineupRule = formatDefinition.lineupRule ?? 'any';
 
       return {
         ...matchup,
@@ -152,11 +279,43 @@ export default function TournamentSessionsEditor({
           if (index !== sideIndex) return side;
 
           if (side.playerIds.includes(playerId)) {
+            setLineupRuleError('');
             return { ...side, playerIds: side.playerIds.filter((id) => id !== playerId) };
+          }
+
+          if (lineupRule === 'same-tier-only') {
+            const currentEntry = entries.find((entry) => entry.id === side.entryId);
+            const selectedTier = currentEntry?.playerTiers?.[playerId];
+
+            if (!selectedTier) {
+              setLineupRuleError('This format requires A/B tiers. Assign player tiers before setting match lineups.');
+              return side;
+            }
+
+            const sideTier = side.playerIds
+              .map((selectedPlayerId) => currentEntry?.playerTiers?.[selectedPlayerId])
+              .find((tier): tier is 'A' | 'B' => tier === 'A' || tier === 'B');
+
+            if (sideTier && sideTier !== selectedTier) {
+              setLineupRuleError('This format requires each side to use players from the same tier (all A or all B).');
+              return side;
+            }
+
+            const oppositeSide = matchup.sides[index === 0 ? 1 : 0];
+            const oppositeEntry = entries.find((entry) => entry.id === oppositeSide.entryId);
+            const oppositeTier = oppositeSide.playerIds
+              .map((selectedPlayerId) => oppositeEntry?.playerTiers?.[selectedPlayerId])
+              .find((tier): tier is 'A' | 'B' => tier === 'A' || tier === 'B');
+
+            if (oppositeTier && oppositeTier !== selectedTier) {
+              setLineupRuleError('This format requires A vs A and B vs B. Match both sides to the same tier.');
+              return side;
+            }
           }
 
           const playerIds =
             limit === 1 ? [playerId] : [...side.playerIds, playerId].slice(-limit);
+          setLineupRuleError('');
           return { ...side, playerIds };
         }),
       };
@@ -184,7 +343,7 @@ export default function TournamentSessionsEditor({
     }));
   };
 
-  const standings = calculateStandings({ entries, sessions } as Tournament);
+  const standings = calculateStandings({ entries, sessions } as Tournament, { playerProfiles });
 
   return (
     <div className="tournament-rounds">
@@ -194,10 +353,57 @@ export default function TournamentSessionsEditor({
           Each nine-hole match is worth {POINTS_FOR_WIN} points to the winning side, or{' '}
           {POINTS_FOR_TIE} point each if halved.
         </p>
+        {lineupRuleError && <p className="tournament-rounds-copy">{lineupRuleError}</p>}
+        {autoScheduleError && <p className="tournament-rounds-copy">{autoScheduleError}</p>}
+
+        <div className="tournament-auto-schedule">
+          <label>
+            <span>Generation mode</span>
+            <select
+              value={autoScheduleMode}
+              onChange={(event) => setAutoScheduleMode(event.target.value as 'append' | 'replace')}
+              aria-label="Generation mode"
+            >
+              <option value="append">Append to existing sessions</option>
+              <option value="replace">Replace existing sessions</option>
+            </select>
+          </label>
+          <label>
+            <span>A/B schedule format</span>
+            <select
+              value={autoScheduleFormat}
+              onChange={(event) => setAutoScheduleFormat(event.target.value as TournamentMatchupFormat)}
+              aria-label="A/B schedule format"
+            >
+              {formatOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="tournament-add-round" onClick={generateAbRoundRobinSessions}>
+            Generate 3-round A/B schedule
+          </button>
+        </div>
       </div>
 
       {sessions.map((session) => (
         <div key={session.id} className="tournament-round">
+          {(() => {
+            const sessionFormatDefinition = getSessionFormatDefinition(session.format, sessionFormats);
+            const usesManualStrokeAllocation =
+              sessionFormatDefinition.useHandicaps &&
+              Boolean(sessionFormatDefinition.handicapRule) &&
+              sessionFormatDefinition.resultMode !== 'net-total';
+
+            return usesManualStrokeAllocation ? (
+              <p className="tournament-rounds-copy tournament-rounds-copy-warning">
+                Strokes are calculated automatically for each matchup from selected players using the configured team handicap formula.
+              </p>
+            ) : null;
+          })()}
+
           <div className="tournament-round-header">
             <input
               type="text"
@@ -228,8 +434,25 @@ export default function TournamentSessionsEditor({
             </select>
           </label>
 
+          {!getSessionFormatDefinition(session.format, sessionFormats).hasTeams && (
+            <p className="tournament-rounds-copy">
+              This format is configured without teams. Tournament sessions are side-based, so each side is limited to 1 player.
+            </p>
+          )}
+
           {session.matchups.map((matchup, matchupIndex) => {
-            const result = resolveMatchup(matchup, session.format, sessionFormats);
+            const result = resolveMatchup(matchup, session.format, sessionFormats, { playerProfiles });
+            const handicapAllowances = result.handicapAllowances ?? [0, 0];
+            const sideHandicaps = result.sideHandicaps ?? [null, null];
+            const hasHandicapRule =
+              getSessionFormatDefinition(session.format, sessionFormats).useHandicaps &&
+              Boolean(getSessionFormatDefinition(session.format, sessionFormats).handicapRule);
+            const allowanceSummary =
+              handicapAllowances[0] > 0
+                ? `${getEntryName(matchup.sides[0].entryId, 'Side A')} receives ${handicapAllowances[0]} stroke${handicapAllowances[0] === 1 ? '' : 's'}`
+                : handicapAllowances[1] > 0
+                  ? `${getEntryName(matchup.sides[1].entryId, 'Side B')} receives ${handicapAllowances[1]} stroke${handicapAllowances[1] === 1 ? '' : 's'}`
+                  : 'No strokes given';
 
             return (
               <div key={matchup.id} className="tournament-matchup">
@@ -252,7 +475,7 @@ export default function TournamentSessionsEditor({
 
                 {matchup.sides.map((side, sideIndex) => {
                   const entry = entries.find((e) => e.id === side.entryId);
-                  const limit = getSessionFormatPlayerCount(session.format, sessionFormats);
+                  const limit = getSideLimitForFormat(session.format);
                   const isWinner = result.winningSideIndex === sideIndex;
 
                   return (
@@ -334,6 +557,12 @@ export default function TournamentSessionsEditor({
                       : `${getEntryName(matchup.sides[result.winningSideIndex ?? 0].entryId, 'Leading side')} +${POINTS_FOR_WIN} · ${result.summary}`}
                   {result.holesPlayed > 0 && !result.isComplete && ' (in progress)'}
                 </p>
+
+                {hasHandicapRule && (
+                  <p className="tournament-matchup-handicap">
+                    Team handicap: {sideHandicaps[0] ?? '—'} vs {sideHandicaps[1] ?? '—'} · {allowanceSummary}
+                  </p>
+                )}
 
                 <label
                   className={`tournament-confirm${matchup.confirmed ? ' is-confirmed' : ''}`}

@@ -57,6 +57,50 @@
     line-height: 1.2;
     text-align: left;
   }
+
+  .matchup-handicap-note {
+    margin: 0 12px 10px;
+    color: color.adjust($dark-color, $lightness: 14%);
+    font-size: $font-xs;
+    font-weight: 600;
+    text-align: left;
+  }
+
+  .matchup-handicap-disclosure {
+    margin: 0 12px 12px;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+    border-radius: $border-radius-sm;
+    background: $white;
+    padding: 6px 8px;
+
+    summary {
+      cursor: pointer;
+      font-size: $font-xs;
+      font-weight: 700;
+      color: color.adjust($dark-color, $lightness: 10%);
+      text-align: left;
+    }
+  }
+
+  .matchup-handicap-breakdown {
+    margin-top: 8px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .matchup-handicap-side-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    font-size: 11px;
+    color: color.adjust($dark-color, $lightness: 12%);
+
+    strong {
+      color: $dark-color;
+      font-size: $font-xs;
+    }
+  }
 }
 
 .table-wrapper {

@@ -28,6 +28,36 @@
   color: $gray;
 }
 
+.tournament-rounds-copy-warning {
+  color: color.adjust($danger-color, $lightness: -4%);
+}
+
+.tournament-auto-schedule {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  margin-top: $spacing-xs;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: $font-xs;
+    font-weight: 700;
+    color: $gray;
+  }
+
+  select {
+    width: 100%;
+    min-width: 0;
+    padding: 4px 6px;
+    border-radius: $border-radius-sm;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+    font-size: $font-xs;
+    background: $white;
+  }
+}
+
 .tournament-round {
   display: flex;
   flex-direction: column;
@@ -238,6 +268,13 @@
   font-size: $font-xs;
   font-weight: 600;
   color: $dark-color;
+}
+
+.tournament-matchup-handicap {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: $gray;
 }
 
 .tournament-confirm {

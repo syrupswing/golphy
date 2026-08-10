@@ -26,6 +26,7 @@ import {
   DEFAULT_TOURNAMENT_SESSION_FORMATS,
   HOLES_PER_MATCH,
   getTournamentSessionFormats,
+  normalizeSessionFormat,
 } from '../tournaments/scoring';
 import { db, isFirebaseConfigured } from './config';
 
@@ -105,9 +106,28 @@ const parseSessionFormats = (source: unknown[] = []): TournamentSessionFormat[] 
       id: typeof format.id === 'string' ? format.id : '',
       name: typeof format.name === 'string' ? format.name : '',
       baseFormat: (typeof format.baseFormat === 'string' ? format.baseFormat : '') as BuiltInTournamentMatchupFormat,
-    }));
+      scoringMode: typeof format.scoringMode === 'string' ? format.scoringMode : undefined,
+      useHandicaps: typeof format.useHandicaps === 'boolean' ? format.useHandicaps : undefined,
+      hasTeams: typeof format.hasTeams === 'boolean' ? format.hasTeams : undefined,
+      ownBall: typeof format.ownBall === 'boolean' ? format.ownBall : undefined,
+      playersPerSide:
+        typeof format.playersPerSide === 'number' ? format.playersPerSide : undefined,
+      resultMode: typeof format.resultMode === 'string' ? format.resultMode : undefined,
+      lineupRule: typeof format.lineupRule === 'string' ? format.lineupRule : undefined,
+      handicapRule:
+        typeof format.handicapRule === 'object' && format.handicapRule !== null
+          ? format.handicapRule
+          : undefined,
+    })) as Array<
+      Partial<TournamentSessionFormat> &
+      Pick<TournamentSessionFormat, 'id' | 'name' | 'baseFormat'>
+    >;
 
-  return getTournamentSessionFormats(parsed).filter(
+  const normalized = parsed
+    .filter((format) => format.id.trim().length > 0 && format.name.trim().length > 0)
+    .map((format) => normalizeSessionFormat(format));
+
+  return getTournamentSessionFormats(normalized).filter(
     (format) => !DEFAULT_TOURNAMENT_SESSION_FORMATS.some((builtin) => builtin.id === format.id)
   );
 };

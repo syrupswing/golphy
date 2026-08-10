@@ -22,6 +22,7 @@ import {
   getSessionFormatLabel,
   getSessionFormatPlayerCount,
   getTournamentSessionFormats,
+  normalizeSessionFormat,
 } from './tournaments/scoring'
 import { isFirebaseConfigured } from './firebase/config'
 import {
@@ -152,6 +153,11 @@ function App() {
   const [editingFormatId, setEditingFormatId] = useState<string | null>(null);
   const [formatName, setFormatName] = useState('');
   const [formatBase, setFormatBase] = useState<keyof typeof MATCHUP_FORMAT_LABELS>('singles');
+  const [formatScoringMode, setFormatScoringMode] = useState<'stroke' | 'match' | 'skins'>('match');
+  const [formatUseHandicaps, setFormatUseHandicaps] = useState(true);
+  const [formatHasTeams, setFormatHasTeams] = useState(true);
+  const [formatOwnBall, setFormatOwnBall] = useState(true);
+  const [formatPlayersPerSide, setFormatPlayersPerSide] = useState('1');
   const [isSavingFormat, setIsSavingFormat] = useState(false);
   const [formatMessage, setFormatMessage] = useState('');
   const [formatError, setFormatError] = useState('');
@@ -199,11 +205,11 @@ function App() {
   };
 
   const competitionDefinition = getSessionFormatDefinition(competitionType, globalSessionFormats);
-  const isHeadToHeadFormat = competitionDefinition.baseFormat !== 'stroke';
-  const requiredRoundPlayers = isHeadToHeadFormat
+  const usesTeamSides = competitionDefinition.hasTeams;
+  const requiredRoundPlayers = usesTeamSides
     ? getSessionFormatPlayerCount(competitionType, globalSessionFormats) * 2
     : 0;
-  const maxRoundPlayers = isHeadToHeadFormat ? requiredRoundPlayers : 8;
+  const maxRoundPlayers = usesTeamSides ? requiredRoundPlayers : 8;
   const competitionLabel = getSessionFormatLabel(competitionType, globalSessionFormats);
 
   useEffect(() => {
@@ -443,6 +449,11 @@ function App() {
     setEditingFormatId(null);
     setFormatName('');
     setFormatBase('singles');
+    setFormatScoringMode('match');
+    setFormatUseHandicaps(true);
+    setFormatHasTeams(true);
+    setFormatOwnBall(true);
+    setFormatPlayersPerSide('1');
     setFormatError('');
     setFormatMessage('');
   };
@@ -452,6 +463,11 @@ function App() {
     setEditingFormatId(format.id);
     setFormatName(format.name);
     setFormatBase(format.baseFormat);
+    setFormatScoringMode(format.scoringMode);
+    setFormatUseHandicaps(format.useHandicaps);
+    setFormatHasTeams(format.hasTeams);
+    setFormatOwnBall(format.ownBall);
+    setFormatPlayersPerSide(String(format.playersPerSide));
     setFormatError('');
     setFormatMessage('');
   };
@@ -461,6 +477,11 @@ function App() {
     setEditingFormatId(null);
     setFormatName('');
     setFormatBase('singles');
+    setFormatScoringMode('match');
+    setFormatUseHandicaps(true);
+    setFormatHasTeams(true);
+    setFormatOwnBall(true);
+    setFormatPlayersPerSide('1');
   };
 
   const saveGlobalFormat = async () => {
@@ -484,16 +505,37 @@ function App() {
       return;
     }
 
+    const parsedPlayersPerSide = Number(formatPlayersPerSide);
+    if (!Number.isFinite(parsedPlayersPerSide) || parsedPlayersPerSide < 1) {
+      setFormatError('Players per side must be at least 1.');
+      return;
+    }
+
+    const existingFormat = editingFormatId
+      ? globalSessionFormats.find((format) => format.id === editingFormatId)
+      : undefined;
+
+    const normalizedFormat = normalizeSessionFormat({
+      id: editingFormatId ?? `format-${createLocalId()}`,
+      name: nextName,
+      baseFormat: formatBase,
+      scoringMode: formatScoringMode,
+      useHandicaps: formatUseHandicaps,
+      hasTeams: formatHasTeams,
+      ownBall: formatOwnBall,
+      playersPerSide: parsedPlayersPerSide,
+      resultMode: existingFormat?.resultMode,
+      lineupRule: existingFormat?.lineupRule,
+      handicapRule: existingFormat?.handicapRule,
+    });
+
     const nextCustomFormats = editingFormatId
       ? globalSessionFormats.map((format) =>
           format.id === editingFormatId
-            ? { ...format, name: nextName, baseFormat: formatBase }
+            ? normalizedFormat
             : format
         )
-      : [
-          ...globalSessionFormats,
-          { id: `format-${createLocalId()}`, name: nextName, baseFormat: formatBase },
-        ];
+      : [...globalSessionFormats, normalizedFormat];
 
     setIsSavingFormat(true);
     setFormatError('');
@@ -708,7 +750,7 @@ function App() {
   };
 
   const buildMatchupConfig = (players: Player[]) => {
-    if (competitionDefinition.baseFormat === 'stroke') {
+    if (!competitionDefinition.hasTeams) {
       return undefined;
     }
 
@@ -727,6 +769,7 @@ function App() {
 
     return {
       format: competitionDefinition.baseFormat,
+      ownBall: competitionDefinition.ownBall,
       teams: [
         {
           id: 'team-a',
@@ -739,6 +782,15 @@ function App() {
           playerIds: sideBPlayers.map((player) => player.id),
         },
       ],
+      handicapRule:
+        competitionDefinition.handicapRule?.type === 'scramble-pair-percentage'
+          ? {
+              type: 'scramble-pair-percentage',
+              lowPercentage: competitionDefinition.handicapRule.lowPercentage,
+              highPercentage: competitionDefinition.handicapRule.highPercentage,
+              rounding: competitionDefinition.handicapRule.rounding,
+            }
+          : undefined,
     };
   };
 
@@ -835,7 +887,7 @@ function App() {
 
     if (gameState.players.length >= maxRoundPlayers) {
       setPlayerProfileError(
-        isHeadToHeadFormat
+        usesTeamSides
           ? `${competitionLabel} requires exactly ${requiredRoundPlayers} players.`
           : 'You can add up to 8 players per round.'
       );
@@ -1269,7 +1321,7 @@ function App() {
 
   const startGame = () => {
     if (gameState.players.length > 0) {
-      if (isHeadToHeadFormat && gameState.players.length !== requiredRoundPlayers) {
+      if (usesTeamSides && gameState.players.length !== requiredRoundPlayers) {
         setPlayerProfileError(
           `${competitionLabel} requires exactly ${requiredRoundPlayers} players.`
         );
@@ -1378,7 +1430,7 @@ function App() {
     try {
       const initialState = buildInitialRoundState();
 
-      if (isHeadToHeadFormat && gameState.players.length !== requiredRoundPlayers) {
+      if (usesTeamSides && gameState.players.length !== requiredRoundPlayers) {
         setSyncError(
           `${competitionLabel} requires exactly ${requiredRoundPlayers} players before creating a shared round.`
         );
@@ -1948,6 +2000,55 @@ function App() {
                           ))}
                         </select>
                       </div>
+                      <div className="field-with-label">
+                        <label htmlFor="global-format-scoring">Scoring mode</label>
+                        <select
+                          id="global-format-scoring"
+                          value={formatScoringMode}
+                          onChange={(event) => setFormatScoringMode(event.target.value as 'stroke' | 'match' | 'skins')}
+                        >
+                          <option value="stroke">Stroke play</option>
+                          <option value="match">Match play</option>
+                          <option value="skins">Skins</option>
+                        </select>
+                      </div>
+                      <div className="field-with-label">
+                        <label htmlFor="global-format-players-per-side">Players per side</label>
+                        <input
+                          id="global-format-players-per-side"
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={6}
+                          value={formatPlayersPerSide}
+                          onChange={(event) => setFormatPlayersPerSide(event.target.value)}
+                          placeholder="1"
+                        />
+                      </div>
+                      <label className="format-toggle-field">
+                        <input
+                          type="checkbox"
+                          checked={formatUseHandicaps}
+                          onChange={(event) => setFormatUseHandicaps(event.target.checked)}
+                        />
+                        <span>Use handicaps</span>
+                      </label>
+                      <label className="format-toggle-field">
+                        <input
+                          type="checkbox"
+                          checked={formatHasTeams}
+                          onChange={(event) => setFormatHasTeams(event.target.checked)}
+                        />
+                        <span>Use teams</span>
+                      </label>
+                      <label className="format-toggle-field">
+                        <input
+                          type="checkbox"
+                          checked={formatOwnBall}
+                          onChange={(event) => setFormatOwnBall(event.target.checked)}
+                        />
+                        <span>Everybody plays own ball</span>
+                      </label>
                     </div>
                     <div className="player-action-row">
                       <button
@@ -1979,7 +2080,16 @@ function App() {
                     {globalSessionFormats.map((format) => (
                       <div key={format.id} className="round-picker-item">
                         <span className="round-picker-name">{format.name}</span>
-                        <span className="round-picker-meta">Uses {MATCHUP_FORMAT_LABELS[format.baseFormat]}</span>
+                        <span className="round-picker-meta">
+                          {format.scoringMode === 'stroke'
+                            ? 'Stroke play'
+                            : format.scoringMode === 'skins'
+                              ? 'Skins'
+                              : 'Match play'}{' '}
+                          · {format.hasTeams ? `${format.playersPerSide} per side` : 'No teams'} ·{' '}
+                          {format.useHandicaps ? 'Handicaps on' : 'Handicaps off'} ·{' '}
+                          {format.ownBall ? 'Own ball' : 'Shared side ball'}
+                        </span>
                         <div className="format-item-actions">
                           <button
                             type="button"
@@ -2263,7 +2373,8 @@ function App() {
                     const nextFormat = normalizeStandaloneFormat(event.target.value);
                     setCompetitionType(nextFormat);
 
-                    if (nextFormat === 'stroke') {
+                    const nextDefinition = getSessionFormatDefinition(nextFormat, globalSessionFormats);
+                    if (!nextDefinition.hasTeams) {
                       setPlayerProfileError('');
                       return;
                     }
@@ -2284,7 +2395,7 @@ function App() {
                     </option>
                   ))}
                 </select>
-                {isHeadToHeadFormat && (
+                {usesTeamSides && (
                   <p className="sync-note">
                     {competitionLabel} requires exactly {requiredRoundPlayers} players.
                   </p>
@@ -2470,7 +2581,7 @@ function App() {
                 onClick={startGame}
                 disabled={
                   gameState.players.length === 0 ||
-                  (isHeadToHeadFormat && gameState.players.length !== requiredRoundPlayers)
+                  (usesTeamSides && gameState.players.length !== requiredRoundPlayers)
                 }
                 className="start-btn"
               >
@@ -2483,7 +2594,7 @@ function App() {
                   disabled={
                     isConnectingRound ||
                     gameState.players.length === 0 ||
-                    (isHeadToHeadFormat && gameState.players.length !== requiredRoundPlayers) ||
+                    (usesTeamSides && gameState.players.length !== requiredRoundPlayers) ||
                     !isFirebaseConfigured
                   }
                   className="share-btn"

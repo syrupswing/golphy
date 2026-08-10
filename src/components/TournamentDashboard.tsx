@@ -151,7 +151,7 @@ export default function TournamentDashboard({
     );
   }
 
-  const standings = calculateStandings(tournament);
+  const standings = calculateStandings(tournament, { playerProfiles });
   const sessions = tournament.sessions ?? tournament.rounds ?? [];
   const allFormats = getTournamentSessionFormats(sessionFormats);
   const totalMatches = sessions.reduce((sum, session) => sum + session.matchups.length, 0);
@@ -265,7 +265,7 @@ export default function TournamentDashboard({
 
           <div className="tournament-dashboard-games">
             {session.matchups.map((matchup, index) => {
-              const result = resolveMatchup(matchup, session.format, sessionFormats);
+              const result = resolveMatchup(matchup, session.format, sessionFormats, { playerProfiles });
               const status =
                 result.holesPlayed === 0
                   ? 'Not started'

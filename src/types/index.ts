@@ -59,6 +59,13 @@ export interface MatchupTeam {
 export interface MatchupConfig {
   format: MatchupFormat;
   teams: MatchupTeam[];
+  ownBall?: boolean;
+  handicapRule?: {
+    type: 'scramble-pair-percentage';
+    lowPercentage: number;
+    highPercentage: number;
+    rounding: 'nearest' | 'up' | 'down';
+  };
 }
 
 export interface GameState {
@@ -111,10 +118,33 @@ export type BuiltInTournamentMatchupFormat =
 // Session format ids can be built-in or custom tournament-defined ids.
 export type TournamentMatchupFormat = string;
 
+export type SessionScoringMode = 'stroke' | 'match' | 'skins';
+
+export type SessionResultMode = 'holes' | 'net-total';
+
+export type SessionLineupRule = 'any' | 'same-tier-only';
+
+export interface ScramblePairPercentageHandicapRule {
+  type: 'scramble-pair-percentage';
+  lowPercentage: number;
+  highPercentage: number;
+  rounding: 'nearest' | 'up' | 'down';
+}
+
+export type SessionHandicapRule = ScramblePairPercentageHandicapRule;
+
 export interface TournamentSessionFormat {
   id: string;
   name: string;
   baseFormat: BuiltInTournamentMatchupFormat;
+  scoringMode: SessionScoringMode;
+  useHandicaps: boolean;
+  hasTeams: boolean;
+  ownBall: boolean;
+  playersPerSide: number;
+  resultMode?: SessionResultMode;
+  lineupRule?: SessionLineupRule;
+  handicapRule?: SessionHandicapRule;
 }
 
 export interface MatchupSide {

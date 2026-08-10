@@ -11,6 +11,7 @@ import type { TournamentSessionFormat } from '../types/index.ts';
 import {
   DEFAULT_TOURNAMENT_SESSION_FORMATS,
   getTournamentSessionFormats,
+  normalizeSessionFormat,
 } from '../tournaments/scoring';
 import { db, isFirebaseConfigured } from './config';
 
@@ -57,6 +58,18 @@ const parseCustomSessionFormats = (source: unknown[] = []): TournamentSessionFor
       id: typeof format.id === 'string' ? format.id : '',
       name: typeof format.name === 'string' ? format.name : '',
       baseFormat: typeof format.baseFormat === 'string' ? format.baseFormat : 'singles',
+      scoringMode: typeof format.scoringMode === 'string' ? format.scoringMode : undefined,
+      useHandicaps: typeof format.useHandicaps === 'boolean' ? format.useHandicaps : undefined,
+      hasTeams: typeof format.hasTeams === 'boolean' ? format.hasTeams : undefined,
+      ownBall: typeof format.ownBall === 'boolean' ? format.ownBall : undefined,
+      playersPerSide:
+        typeof format.playersPerSide === 'number' ? format.playersPerSide : undefined,
+      resultMode: typeof format.resultMode === 'string' ? format.resultMode : undefined,
+      lineupRule: typeof format.lineupRule === 'string' ? format.lineupRule : undefined,
+      handicapRule:
+        typeof format.handicapRule === 'object' && format.handicapRule !== null
+          ? format.handicapRule
+          : undefined,
     })) as TournamentSessionFormat[];
 
   return getTournamentSessionFormats(parsed).filter(
@@ -69,11 +82,7 @@ const sanitizeCustomSessionFormats = (
 ): TournamentSessionFormat[] =>
   getTournamentSessionFormats(formats)
     .filter((format) => !DEFAULT_TOURNAMENT_SESSION_FORMATS.some((builtin) => builtin.id === format.id))
-    .map((format) => ({
-      id: format.id,
-      name: format.name,
-      baseFormat: format.baseFormat,
-    }));
+    .map((format) => normalizeSessionFormat(format));
 
 export const listGlobalSessionFormats = async (): Promise<TournamentSessionFormat[]> => {
   const firestore = ensureFirebase();
