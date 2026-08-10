@@ -282,6 +282,34 @@
   color: $dark-color;
   font-size: $font-xs;
   font-weight: 600;
+
+  &.is-secondary {
+    background: $white;
+  }
+}
+
+.tournament-session-create-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $spacing-xs;
+  width: min(100%, 420px);
+
+  input,
+  select {
+    width: 100%;
+    min-width: 0;
+    padding: $spacing-xs $spacing-sm;
+    border-radius: $border-radius-sm;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+    font-size: $font-sm;
+    background: $white;
+  }
+}
+
+.tournament-session-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
 }
 
 .tournament-standings {

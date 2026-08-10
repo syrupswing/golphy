@@ -12,15 +12,21 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import type {
+  BuiltInTournamentMatchupFormat,
   PlayerTier,
   TierAssignmentMode,
   Tournament,
   TournamentEntry,
   TournamentFormat,
   TournamentMatchupFormat,
-  TournamentRound,
+  TournamentSessionFormat,
+  TournamentSession,
 } from '../types/index.ts';
-import { HOLES_PER_GAME, MATCHUP_FORMAT_LABELS } from '../tournaments/scoring';
+import {
+  DEFAULT_TOURNAMENT_SESSION_FORMATS,
+  HOLES_PER_MATCH,
+  getTournamentSessionFormats,
+} from '../tournaments/scoring';
 import { db, isFirebaseConfigured } from './config';
 
 // Team tournaments are played with a fixed two-A, two-B roster.
@@ -33,7 +39,9 @@ interface TournamentDocument {
   format: TournamentFormat;
   tierMode?: TierAssignmentMode;
   entries: TournamentEntry[];
-  rounds?: TournamentRound[];
+  sessionFormats?: TournamentSessionFormat[];
+  sessions?: TournamentSession[];
+  rounds?: TournamentSession[];
   createdBy?: string;
   updatedBy?: string;
   createdAt?: unknown;
@@ -45,7 +53,9 @@ export interface TournamentInput {
   format: TournamentFormat;
   tierMode: TierAssignmentMode;
   entries: TournamentEntry[];
-  rounds: TournamentRound[];
+  sessionFormats?: TournamentSessionFormat[];
+  sessions?: TournamentSession[];
+  rounds?: TournamentSession[];
 }
 
 const ensureFirebase = () => {
@@ -86,7 +96,75 @@ const createEntryId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
-const parseDoc = (id: string, data: TournamentDocument): Tournament => ({
+const parseSessionFormats = (source: unknown[] = []): TournamentSessionFormat[] => {
+  const parsed = source
+    .filter((candidate): candidate is Record<string, unknown> =>
+      typeof candidate === 'object' && candidate !== null
+    )
+    .map((format) => ({
+      id: typeof format.id === 'string' ? format.id : '',
+      name: typeof format.name === 'string' ? format.name : '',
+      baseFormat: (typeof format.baseFormat === 'string' ? format.baseFormat : '') as BuiltInTournamentMatchupFormat,
+    }));
+
+  return getTournamentSessionFormats(parsed).filter(
+    (format) => !DEFAULT_TOURNAMENT_SESSION_FORMATS.some((builtin) => builtin.id === format.id)
+  );
+};
+
+const parseSessions = (source: unknown[] = []): TournamentSession[] =>
+  source
+    .filter((candidate): candidate is Record<string, unknown> =>
+      typeof candidate === 'object' && candidate !== null
+    )
+    .map((session) => {
+      const rawMatchups = Array.isArray(session.matchups) ? session.matchups : [];
+      const firstMatchup = rawMatchups[0] as { format?: unknown } | undefined;
+      const rawFormat =
+        typeof session.format === 'string'
+          ? session.format
+          : typeof firstMatchup?.format === 'string'
+            ? firstMatchup.format
+            : 'singles';
+
+      const format =
+        typeof rawFormat === 'string' && rawFormat.trim().length > 0
+          ? (rawFormat as TournamentMatchupFormat)
+          : 'singles';
+
+      return {
+        id: typeof session.id === 'string' ? session.id : createEntryId(),
+        name: typeof session.name === 'string' ? session.name : 'Session',
+        format,
+        matchups: rawMatchups
+          .filter((candidate): candidate is Record<string, unknown> =>
+            typeof candidate === 'object' && candidate !== null
+          )
+          .map((matchup) => ({
+            id: typeof matchup.id === 'string' ? matchup.id : createEntryId(),
+            confirmed: matchup.confirmed === true,
+            sides: (Array.isArray(matchup.sides) ? matchup.sides : [])
+              .filter((candidate): candidate is Record<string, unknown> =>
+                typeof candidate === 'object' && candidate !== null
+              )
+              .map((side) => ({
+                entryId: typeof side.entryId === 'string' ? side.entryId : '',
+                playerIds: Array.isArray(side.playerIds)
+                  ? side.playerIds.filter((id): id is string => typeof id === 'string')
+                  : [],
+                scores: Array.isArray(side.scores)
+                  ? side.scores.filter((score): score is number => Number.isFinite(score))
+                  : [],
+              })),
+          })),
+      };
+    });
+
+const parseDoc = (id: string, data: TournamentDocument): Tournament => {
+  const sessionFormats = parseSessionFormats((data.sessionFormats ?? []) as unknown[]);
+  const sessions = parseSessions((data.sessions ?? data.rounds ?? []) as unknown[]);
+
+  return {
   id,
   name: data.name,
   format: data.format === 'team' ? 'team' : 'individual',
@@ -97,37 +175,25 @@ const parseDoc = (id: string, data: TournamentDocument): Tournament => ({
     playerIds: entry.playerIds ?? [],
     playerTiers: entry.playerTiers ?? {},
   })),
-  rounds: (data.rounds ?? []).map((round) => ({
-    id: round.id,
-    name: round.name,
-    roundId: round.roundId ?? '',
-    matchups: (round.matchups ?? []).map((matchup) => ({
-      id: matchup.id,
-      format: matchup.format,
-      confirmed: matchup.confirmed === true,
-      sides: (matchup.sides ?? []).map((side) => ({
-        entryId: side.entryId ?? '',
-        playerIds: side.playerIds ?? [],
-        scores: side.scores ?? [],
-      })),
-    })),
-  })),
+  sessions,
+  sessionFormats,
+  rounds: sessions,
   createdBy: data.createdBy,
-});
+  };
+};
 
-const sanitizeRounds = (rounds: TournamentRound[]): TournamentRound[] =>
-  rounds.map((round) => ({
-    id: round.id || createEntryId(),
-    name: round.name.trim(),
-    roundId: round.roundId?.trim() ?? '',
-    matchups: round.matchups.map((matchup) => ({
+const sanitizeSessions = (sessions: TournamentSession[]): TournamentSession[] =>
+  sessions.map((session) => ({
+    id: session.id || createEntryId(),
+    name: session.name.trim(),
+    format: (session.format || 'singles') as TournamentMatchupFormat,
+    matchups: session.matchups.map((matchup) => ({
       id: matchup.id || createEntryId(),
-      format: (MATCHUP_FORMAT_LABELS[matchup.format] ? matchup.format : 'singles') as TournamentMatchupFormat,
       confirmed: matchup.confirmed === true,
       sides: matchup.sides.slice(0, 2).map((side) => ({
         entryId: side.entryId ?? '',
         playerIds: side.playerIds.filter(Boolean),
-        scores: Array.from({ length: HOLES_PER_GAME }, (_, hole) => {
+        scores: Array.from({ length: HOLES_PER_MATCH }, (_, hole) => {
           const value = side.scores?.[hole];
           return Number.isFinite(value) && value > 0 ? value : 0;
         }),
@@ -243,13 +309,16 @@ export const createTournament = async (
   const entries = validateInput(input);
   await assertNameIsAvailable(input.name);
 
+  const sessions = sanitizeSessions(input.sessions ?? input.rounds ?? []);
+
   const payload: TournamentDocument = {
     name: input.name.trim(),
     nameKey: toNameKey(input.name),
     format: input.format,
     tierMode: input.tierMode,
     entries,
-    rounds: sanitizeRounds(input.rounds ?? []),
+    sessions,
+    rounds: sessions,
     createdBy: clientId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -271,13 +340,16 @@ export const updateTournament = async (
   const entries = validateInput(input);
   await assertNameIsAvailable(input.name, id);
 
+  const sessions = sanitizeSessions(input.sessions ?? input.rounds ?? []);
+
   const payload = {
     name: input.name.trim(),
     nameKey: toNameKey(input.name),
     format: input.format,
     tierMode: input.tierMode,
     entries,
-    rounds: sanitizeRounds(input.rounds ?? []),
+    sessions,
+    rounds: sessions,
     updatedAt: serverTimestamp(),
   };
 
@@ -289,7 +361,8 @@ export const updateTournament = async (
       format: payload.format,
       tierMode: payload.tierMode,
       entries,
-      rounds: payload.rounds,
+      sessions: payload.sessions,
+      rounds: payload.sessions,
     };
   } catch (error) {
     throw toUserError(error, 'Failed to update tournament.');
@@ -306,17 +379,19 @@ export const deleteTournament = async (id: string): Promise<void> => {
   }
 };
 
-// Scores save continuously, so this writes only the rounds field and skips name validation.
-export const saveTournamentRounds = async (
+// Scores save continuously, so this writes only session/round fields and skips name validation.
+export const saveTournamentSessions = async (
   id: string,
-  rounds: TournamentRound[],
+  sessions: TournamentSession[],
   clientId: string
 ): Promise<void> => {
   const firestore = ensureFirebase();
+  const sanitizedSessions = sanitizeSessions(sessions);
 
   try {
     await updateDoc(doc(firestore, 'tournaments', id), {
-      rounds: sanitizeRounds(rounds),
+      sessions: sanitizedSessions,
+      rounds: sanitizedSessions,
       updatedBy: clientId,
       updatedAt: serverTimestamp(),
     });
@@ -324,6 +399,9 @@ export const saveTournamentRounds = async (
     throw toUserError(error, 'Failed to save scores.');
   }
 };
+
+// Backward-compatible alias while module naming migrates from rounds to sessions.
+export const saveTournamentRounds = saveTournamentSessions;
 
 export const subscribeToTournament = (
   id: string,

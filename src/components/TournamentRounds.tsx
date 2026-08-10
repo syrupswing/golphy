@@ -1,48 +1,49 @@
+import { useState } from 'react';
 import type {
   PlayerProfile,
   Tournament,
   TournamentEntry,
   TournamentMatchup,
   TournamentMatchupFormat,
-  TournamentRound,
+  TournamentSessionFormat,
+  TournamentSession,
 } from '../types/index.ts';
 import {
   calculateStandings,
   createEmptyMatchup,
-  createEmptyRound,
-  HOLES_PER_GAME,
-  MATCHUP_FORMAT_LABELS,
-  MATCHUP_FORMAT_PLAYER_COUNTS,
+  createSessionWithConfig,
+  getSessionFormatLabel,
+  getSessionFormatPlayerCount,
+  getTournamentSessionFormats,
+  HOLES_PER_MATCH,
   POINTS_FOR_TIE,
   POINTS_FOR_WIN,
   resolveMatchup,
 } from '../tournaments/scoring';
 import './TournamentRounds.scss';
 
-interface PlayableRound {
-  id: string;
-  alias?: string;
-  scorecardName?: string;
-  totalHoles: number;
-}
-
-interface TournamentRoundsProps {
+interface TournamentSessionsEditorProps {
   entries: TournamentEntry[];
-  rounds: TournamentRound[];
+  sessions: TournamentSession[];
+  sessionFormats?: TournamentSessionFormat[];
   playerProfiles: PlayerProfile[];
-  playableRounds: PlayableRound[];
-  onChange: (rounds: TournamentRound[]) => void;
+  onChange: (sessions: TournamentSession[]) => void;
 }
 
-const FORMAT_OPTIONS = Object.keys(MATCHUP_FORMAT_LABELS) as TournamentMatchupFormat[];
-
-export default function TournamentRounds({
+export default function TournamentSessionsEditor({
   entries,
-  rounds,
+  sessions,
+  sessionFormats = [],
   playerProfiles,
-  playableRounds,
   onChange,
-}: TournamentRoundsProps) {
+}: TournamentSessionsEditorProps) {
+  const formatOptions = getTournamentSessionFormats(sessionFormats);
+  const [isSessionFormOpen, setIsSessionFormOpen] = useState(false);
+  const [newSessionName, setNewSessionName] = useState('');
+  const [newSessionFormat, setNewSessionFormat] = useState<TournamentMatchupFormat>(
+    formatOptions[0]?.id ?? 'singles'
+  );
+
   const getPlayerName = (playerId: string) => {
     const profile = playerProfiles.find((p) => p.id === playerId);
     if (!profile) return 'Unknown player';
@@ -55,53 +56,79 @@ export default function TournamentRounds({
     return entry.name.trim() || getPlayerName(entry.playerIds[0] ?? '');
   };
 
-  const updateRound = (roundId: string, updater: (round: TournamentRound) => TournamentRound) => {
-    onChange(rounds.map((round) => (round.id === roundId ? updater(round) : round)));
+  const updateSession = (sessionId: string, updater: (session: TournamentSession) => TournamentSession) => {
+    onChange(sessions.map((session) => (session.id === sessionId ? updater(session) : session)));
   };
 
   const updateMatchup = (
-    roundId: string,
+    sessionId: string,
     matchupId: string,
     updater: (matchup: TournamentMatchup) => TournamentMatchup
   ) => {
-    updateRound(roundId, (round) => ({
-      ...round,
-      matchups: round.matchups.map((matchup) =>
+    updateSession(sessionId, (session) => ({
+      ...session,
+      matchups: session.matchups.map((matchup) =>
         matchup.id === matchupId ? updater(matchup) : matchup
       ),
     }));
   };
 
-  const addRound = () => {
+  const openSessionForm = () => {
+    setNewSessionName(`Session ${sessions.length + 1}`);
+    setNewSessionFormat(formatOptions[0]?.id ?? 'singles');
+    setIsSessionFormOpen(true);
+  };
+
+  const cancelSessionForm = () => {
+    setIsSessionFormOpen(false);
+    setNewSessionName('');
+    setNewSessionFormat(formatOptions[0]?.id ?? 'singles');
+  };
+
+  const addSession = () => {
+    const sessionName = newSessionName.trim();
+    if (!sessionName) {
+      return;
+    }
+
     onChange([
-      ...rounds,
-      createEmptyRound(rounds.length),
+      ...sessions,
+      createSessionWithConfig(
+        sessions.length,
+        sessionName,
+        newSessionFormat
+      ),
     ]);
+
+    cancelSessionForm();
   };
 
-  const removeRound = (roundId: string) => {
-    onChange(rounds.filter((round) => round.id !== roundId));
+  const removeSession = (sessionId: string) => {
+    onChange(sessions.filter((session) => session.id !== sessionId));
   };
 
-  const changeFormat = (roundId: string, matchupId: string, format: TournamentMatchupFormat) => {
-    updateMatchup(roundId, matchupId, (matchup) => ({
-      ...matchup,
+  const changeSessionFormat = (sessionId: string, format: TournamentMatchupFormat) => {
+    updateSession(sessionId, (session) => ({
+      ...session,
       format,
-      // Trim rosters that no longer fit the new format.
-      sides: matchup.sides.map((side) => ({
-        ...side,
-        playerIds: side.playerIds.slice(0, MATCHUP_FORMAT_PLAYER_COUNTS[format]),
+      // Trim every match roster to the selected session format.
+      matchups: session.matchups.map((matchup) => ({
+        ...matchup,
+        sides: matchup.sides.map((side) => ({
+          ...side,
+          playerIds: side.playerIds.slice(0, getSessionFormatPlayerCount(format, sessionFormats)),
+        })),
       })),
     }));
   };
 
   const setSideEntry = (
-    roundId: string,
+    sessionId: string,
     matchupId: string,
     sideIndex: number,
     entryId: string
   ) => {
-    updateMatchup(roundId, matchupId, (matchup) => ({
+    updateMatchup(sessionId, matchupId, (matchup) => ({
       ...matchup,
       sides: matchup.sides.map((side, index) =>
         index === sideIndex ? { ...side, entryId, playerIds: [] } : side
@@ -110,13 +137,14 @@ export default function TournamentRounds({
   };
 
   const toggleSidePlayer = (
-    roundId: string,
+    sessionId: string,
     matchupId: string,
     sideIndex: number,
     playerId: string
   ) => {
-    updateMatchup(roundId, matchupId, (matchup) => {
-      const limit = MATCHUP_FORMAT_PLAYER_COUNTS[matchup.format];
+    updateMatchup(sessionId, matchupId, (matchup) => {
+      const session = sessions.find((item) => item.id === sessionId);
+      const limit = getSessionFormatPlayerCount(session?.format ?? 'singles', sessionFormats);
 
       return {
         ...matchup,
@@ -136,7 +164,7 @@ export default function TournamentRounds({
   };
 
   const setHoleScore = (
-    roundId: string,
+    sessionId: string,
     matchupId: string,
     sideIndex: number,
     hole: number,
@@ -145,90 +173,74 @@ export default function TournamentRounds({
     const parsed = value === '' ? 0 : parseInt(value);
     if (isNaN(parsed) || parsed < 0) return;
 
-    updateMatchup(roundId, matchupId, (matchup) => ({
+    updateMatchup(sessionId, matchupId, (matchup) => ({
       ...matchup,
       sides: matchup.sides.map((side, index) => {
         if (index !== sideIndex) return side;
-        const scores = Array.from({ length: HOLES_PER_GAME }, (_, i) => side.scores[i] ?? 0);
+        const scores = Array.from({ length: HOLES_PER_MATCH }, (_, i) => side.scores[i] ?? 0);
         scores[hole] = parsed;
         return { ...side, scores };
       }),
     }));
   };
 
-  const standings = calculateStandings({ entries, rounds } as Tournament);
+  const standings = calculateStandings({ entries, sessions } as Tournament);
 
   return (
     <div className="tournament-rounds">
       <div className="tournament-rounds-header">
-        <p className="tournament-rounds-title">Rounds and matchups</p>
+        <p className="tournament-rounds-title">Sessions and matches</p>
         <p className="tournament-rounds-copy">
-          Each nine-hole game is worth {POINTS_FOR_WIN} points to the winning side, or{' '}
+          Each nine-hole match is worth {POINTS_FOR_WIN} points to the winning side, or{' '}
           {POINTS_FOR_TIE} point each if halved.
         </p>
       </div>
 
-      {rounds.map((round) => (
-        <div key={round.id} className="tournament-round">
+      {sessions.map((session) => (
+        <div key={session.id} className="tournament-round">
           <div className="tournament-round-header">
             <input
               type="text"
-              value={round.name}
+              value={session.name}
               onChange={(e) =>
-                updateRound(round.id, (current) => ({ ...current, name: e.target.value }))
+                updateSession(session.id, (current) => ({ ...current, name: e.target.value }))
               }
-              placeholder="Round name"
+              placeholder="Session name"
               maxLength={40}
-              aria-label="Round name"
+              aria-label="Session name"
             />
-            <button type="button" className="tournament-round-remove" onClick={() => removeRound(round.id)}>
-              Remove round
+            <button type="button" className="tournament-round-remove" onClick={() => removeSession(session.id)}>
+              Remove session
             </button>
           </div>
 
           <label className="tournament-round-link">
-            <span>Played round</span>
+            <span>Session format</span>
             <select
-              value={round.roundId ?? ''}
-              onChange={(e) =>
-                updateRound(round.id, (current) => ({ ...current, roundId: e.target.value }))
-              }
+              value={session.format}
+              onChange={(e) => changeSessionFormat(session.id, e.target.value as TournamentMatchupFormat)}
             >
-              <option value="">Not linked to a round</option>
-              {playableRounds.map((option) => (
+              {formatOptions.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {(option.alias?.trim() || option.scorecardName?.trim() || 'Round') +
-                    ` · ${option.totalHoles} holes · ${option.id}`}
+                  {option.name}
                 </option>
               ))}
             </select>
           </label>
 
-          {round.matchups.map((matchup, matchupIndex) => {
-            const result = resolveMatchup(matchup);
+          {session.matchups.map((matchup, matchupIndex) => {
+            const result = resolveMatchup(matchup, session.format, sessionFormats);
 
             return (
               <div key={matchup.id} className="tournament-matchup">
                 <div className="tournament-matchup-top">
-                  <span className="tournament-matchup-index">Game {matchupIndex + 1}</span>
-                  <select
-                    value={matchup.format}
-                    onChange={(e) =>
-                      changeFormat(round.id, matchup.id, e.target.value as TournamentMatchupFormat)
-                    }
-                    aria-label={`Game ${matchupIndex + 1} format`}
-                  >
-                    {FORMAT_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {MATCHUP_FORMAT_LABELS[option]}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="tournament-matchup-index">Match {matchupIndex + 1}</span>
+                  <span className="game-format">{getSessionFormatLabel(session.format, sessionFormats)}</span>
                   <button
                     type="button"
                     className="tournament-matchup-remove"
                     onClick={() =>
-                      updateRound(round.id, (current) => ({
+                      updateSession(session.id, (current) => ({
                         ...current,
                         matchups: current.matchups.filter((m) => m.id !== matchup.id),
                       }))
@@ -240,7 +252,7 @@ export default function TournamentRounds({
 
                 {matchup.sides.map((side, sideIndex) => {
                   const entry = entries.find((e) => e.id === side.entryId);
-                  const limit = MATCHUP_FORMAT_PLAYER_COUNTS[matchup.format];
+                  const limit = getSessionFormatPlayerCount(session.format, sessionFormats);
                   const isWinner = result.winningSideIndex === sideIndex;
 
                   return (
@@ -251,9 +263,9 @@ export default function TournamentRounds({
                       <select
                         value={side.entryId}
                         onChange={(e) =>
-                          setSideEntry(round.id, matchup.id, sideIndex, e.target.value)
+                          setSideEntry(session.id, matchup.id, sideIndex, e.target.value)
                         }
-                        aria-label={`Game ${matchupIndex + 1} side ${sideIndex + 1} team`}
+                        aria-label={`Match ${matchupIndex + 1} side ${sideIndex + 1} team`}
                       >
                         <option value="">Pick a team</option>
                         {entries.map((option) => (
@@ -275,7 +287,7 @@ export default function TournamentRounds({
                                 type="button"
                                 className={`tournament-side-chip${isSelected ? ' selected' : ''}`}
                                 onClick={() =>
-                                  toggleSidePlayer(round.id, matchup.id, sideIndex, playerId)
+                                  toggleSidePlayer(session.id, matchup.id, sideIndex, playerId)
                                 }
                               >
                                 {getPlayerName(playerId)}
@@ -290,7 +302,7 @@ export default function TournamentRounds({
                       )}
 
                       <div className="tournament-side-scores">
-                        {Array.from({ length: HOLES_PER_GAME }, (_, hole) => (
+                        {Array.from({ length: HOLES_PER_MATCH }, (_, hole) => (
                           <label key={hole} className="tournament-score-cell">
                             <span>{hole + 1}</span>
                             <input
@@ -300,9 +312,9 @@ export default function TournamentRounds({
                               max={20}
                               value={side.scores[hole] || ''}
                               onChange={(e) =>
-                                setHoleScore(round.id, matchup.id, sideIndex, hole, e.target.value)
+                                setHoleScore(session.id, matchup.id, sideIndex, hole, e.target.value)
                               }
-                              aria-label={`Game ${matchupIndex + 1} side ${sideIndex + 1} hole ${hole + 1}`}
+                              aria-label={`Match ${matchupIndex + 1} side ${sideIndex + 1} hole ${hole + 1}`}
                             />
                           </label>
                         ))}
@@ -336,7 +348,7 @@ export default function TournamentRounds({
                     checked={Boolean(matchup.confirmed)}
                     disabled={!result.isComplete}
                     onChange={(e) =>
-                      updateMatchup(round.id, matchup.id, (current) => ({
+                      updateMatchup(session.id, matchup.id, (current) => ({
                         ...current,
                         confirmed: e.target.checked,
                       }))
@@ -352,20 +364,52 @@ export default function TournamentRounds({
             type="button"
             className="tournament-add-game"
             onClick={() =>
-              updateRound(round.id, (current) => ({
+              updateSession(session.id, (current) => ({
                 ...current,
                 matchups: [...current.matchups, createEmptyMatchup()],
               }))
             }
           >
-            Add game
+            Add match
           </button>
         </div>
       ))}
 
-      <button type="button" className="tournament-add-round" onClick={addRound}>
-        Add round
-      </button>
+      {isSessionFormOpen ? (
+        <div className="tournament-session-create-form">
+          <input
+            type="text"
+            value={newSessionName}
+            onChange={(event) => setNewSessionName(event.target.value)}
+            placeholder="Session name"
+            maxLength={40}
+            aria-label="Session name"
+          />
+          <select
+            value={newSessionFormat}
+            onChange={(event) => setNewSessionFormat(event.target.value as TournamentMatchupFormat)}
+            aria-label="Session format"
+          >
+            {formatOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+          <div className="tournament-session-create-actions">
+            <button type="button" className="tournament-add-round" onClick={addSession}>
+              Create session
+            </button>
+            <button type="button" className="tournament-add-round is-secondary" onClick={cancelSessionForm}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="tournament-add-round" onClick={openSessionForm}>
+          Add session
+        </button>
+      )}
 
       {standings.length > 0 && (
         <div className="tournament-standings">

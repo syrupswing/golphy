@@ -761,6 +761,13 @@
         font-weight: 700;
         color: $dark-color;
       }
+
+      select {
+        width: 100%;
+        padding: $spacing-md;
+        border-radius: $border-radius-md;
+        font-size: $font-md;
+      }
     }
 
     input {
@@ -808,6 +815,19 @@
 
     &:hover {
       background: color.adjust($light-color, $lightness: -6%);
+    }
+  }
+
+  .format-item-actions {
+    display: flex;
+    gap: $spacing-xs;
+    margin-top: $spacing-sm;
+
+    .reveal-player-btn {
+      width: auto;
+      margin-bottom: 0;
+      padding: $spacing-xs $spacing-sm;
+      font-size: $font-xs;
     }
   }
 

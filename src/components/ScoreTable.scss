@@ -12,6 +12,51 @@
     color: $dark-color;
     margin: 20px 12px 8px;
   }
+
+  .round-tournament-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 12px 10px;
+  }
+
+  .round-tournament-back-btn {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: color.adjust($primary-color, $lightness: -10%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+
+    &:hover {
+      background: color.adjust($primary-color, $lightness: 42%);
+      color: color.adjust($primary-color, $lightness: -18%);
+    }
+
+    &:focus-visible {
+      outline: 2px solid color.adjust($primary-color, $lightness: -4%);
+      outline-offset: 1px;
+    }
+
+    .bi {
+      font-size: 14px;
+      line-height: 1;
+    }
+  }
+
+  .round-tournament-name {
+    margin: 0;
+    color: color.adjust($dark-color, $lightness: 18%);
+    font-size: $font-sm;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: left;
+  }
 }
 
 .table-wrapper {
@@ -351,9 +396,16 @@
 
         .player-info {
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           gap: $spacing-sm;
           min-width: 0;
+
+          .player-meta {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            flex: 1;
+          }
 
           .player-name {
             display: block;
@@ -378,8 +430,38 @@
             transform: translateY(4px);
           }
 
+          .player-team-name {
+            display: block;
+            max-width: 100%;
+            margin-top: -2px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: clip;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1.1;
+            letter-spacing: 0.02em;
+            color: color.adjust($dark-color, $lightness: 26%);
+            opacity: 0.45;
+
+            &.is-overflowed {
+              -webkit-mask-image: linear-gradient(
+                to right,
+                #000 calc(100% - 10px),
+                rgba(0, 0, 0, 0) 100%
+              );
+              mask-image: linear-gradient(
+                to right,
+                #000 calc(100% - 10px),
+                rgba(0, 0, 0, 0) 100%
+              );
+            }
+          }
+
           .player-handicap {
             flex-shrink: 0;
+            margin-top: 2px;
             margin-left: auto;
             padding: 1px 6px;
             border-radius: 999px;

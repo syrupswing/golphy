@@ -35,6 +35,12 @@
   }
 }
 
+.tournament-dashboard-header-actions {
+  display: flex;
+  gap: $spacing-xs;
+  align-items: center;
+}
+
 .tournament-dashboard-manage {
   flex-shrink: 0;
   padding: $spacing-xs $spacing-md;
@@ -82,6 +88,104 @@
   font-weight: 700;
   letter-spacing: 0.5px;
   color: $gray;
+}
+
+.tournament-dashboard-open-card {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: $border-radius-sm;
+  background: $primary-color;
+  color: $white;
+  font-size: $font-xs;
+  font-weight: 600;
+
+  &:disabled {
+    background: color.adjust($light-color, $lightness: -8%);
+    color: $gray;
+    cursor: not-allowed;
+  }
+}
+
+.tournament-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+}
+
+.tournament-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.tournament-session-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: $border-radius-sm;
+  background: $light-color;
+  border: 1px solid color.adjust($light-color, $lightness: -12%);
+  color: color.adjust($dark-color, $lightness: -8%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  .bi {
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  &:hover {
+    background: color.adjust($light-color, $lightness: -2%);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color.adjust($primary-color, $lightness: -4%);
+    outline-offset: 1px;
+  }
+
+  &.is-danger {
+    color: color.adjust($danger-color, $lightness: -8%);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.tournament-session-actions-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tournament-format-list {
+  display: grid;
+  gap: $spacing-xs;
+}
+
+.tournament-format-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $border-radius-sm;
+  border: 1px solid color.adjust($light-color, $lightness: -8%);
+  background: color.adjust($light-color, $lightness: 2%);
+
+  p {
+    margin: 0;
+    font-size: $font-sm;
+    font-weight: 600;
+    color: $dark-color;
+  }
+
+  span {
+    font-size: $font-xs;
+    color: $gray;
+  }
 }
 
 .tournament-dashboard-standings {
@@ -138,6 +242,36 @@
     background: $gray;
     cursor: not-allowed;
   }
+
+  &.is-secondary {
+    background: $light-color;
+    color: $dark-color;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+  }
+}
+
+.tournament-session-create-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $spacing-xs;
+  width: min(100%, 460px);
+
+  input,
+  select {
+    width: 100%;
+    min-width: 0;
+    padding: $spacing-xs $spacing-sm;
+    border-radius: $border-radius-sm;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+    font-size: $font-sm;
+    background: $white;
+  }
+}
+
+.tournament-session-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
 }
 
 .tournament-dashboard-note {
@@ -169,9 +303,41 @@
   }
 
   footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $spacing-sm;
     font-size: $font-xs;
     font-weight: 600;
     color: $dark-color;
+  }
+}
+
+.game-open-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: color.adjust($primary-color, $lightness: -10%);
+  font-size: $font-xs;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+
+  &:hover {
+    color: color.adjust($primary-color, $lightness: -18%);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color.adjust($primary-color, $lightness: -4%);
+    outline-offset: 1px;
+    border-radius: 3px;
+  }
+
+  &:disabled {
+    color: $gray;
+    text-decoration: none;
+    cursor: not-allowed;
   }
 }
 

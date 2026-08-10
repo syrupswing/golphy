@@ -1,9 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Player, PlayerProfile, Score, GameState, Scorecard, NineHoleSet, HoleInfo, StrokeIndexAllocation, Tournament } from './types/index.ts'
+import type {
+  Player,
+  PlayerProfile,
+  Score,
+  GameState,
+  Scorecard,
+  NineHoleSet,
+  HoleInfo,
+  StrokeIndexAllocation,
+  TournamentMatchupFormat,
+  TournamentSessionFormat,
+  Tournament,
+} from './types/index.ts'
 import ScoreTable from './components/ScoreTable'
 import ScorecardSelector from './components/ScorecardSelector'
 import TournamentManager from './components/TournamentManager'
 import TournamentDashboard from './components/TournamentDashboard'
+import {
+  MATCHUP_FORMAT_LABELS,
+  getSessionFormatDefinition,
+  getSessionFormatLabel,
+  getSessionFormatPlayerCount,
+  getTournamentSessionFormats,
+} from './tournaments/scoring'
 import { isFirebaseConfigured } from './firebase/config'
 import {
   createRound,
@@ -21,6 +40,10 @@ import {
   listTournaments,
   updateTournament,
 } from './firebase/tournaments'
+import {
+  saveGlobalSessionFormats,
+  subscribeToGlobalSessionFormats,
+} from './firebase/formats'
 import type { TournamentInput } from './firebase/tournaments'
 import './styles/App.scss'
 import golphyBanner from './assets/Golphy-banner.svg'
@@ -45,7 +68,7 @@ interface PersistedAppSession {
   view: 'home' | 'game' | 'tournament';
   homeStep: 'choose' | 'new' | 'join';
   newRoundStep: 'course' | 'details';
-  competitionType: 'stroke' | 'match-play';
+  competitionType: TournamentMatchupFormat | 'match-play';
   gameStarted: boolean;
   gameState: GameState;
   totalHoles: number;
@@ -55,6 +78,7 @@ interface PersistedAppSession {
   selectedScorecard: Scorecard | null;
   selectedSetIndexes: number[];
   activeTournamentId: string | null;
+  activeRoundTournamentId: string | null;
 }
 
 const createClientId = (): string => {
@@ -77,7 +101,7 @@ function App() {
   const [view, setView] = useState<'home' | 'game' | 'tournament'>('home');
   const [homeStep, setHomeStep] = useState<'choose' | 'new' | 'join'>('choose');
   const [newRoundStep, setNewRoundStep] = useState<'course' | 'details'>('course');
-  const [competitionType, setCompetitionType] = useState<'stroke' | 'match-play'>('stroke');
+  const [competitionType, setCompetitionType] = useState<TournamentMatchupFormat>('stroke');
   const [gameStarted, setGameStarted] = useState(false);
   const [gameState, setGameState] = useState<GameState>(DEFAULT_GAME_STATE);
   const [newPlayerFirstName, setNewPlayerFirstName] = useState('');
@@ -118,15 +142,19 @@ function App() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [tournamentPanelMode, setTournamentPanelMode] = useState<'closed' | 'add' | 'edit'>('closed');
   const [activeTournamentId, setActiveTournamentId] = useState<string | null>(null);
+  const [tournamentViewMode, setTournamentViewMode] = useState<'dashboard' | 'manage'>('dashboard');
+  const [activeRoundTournamentId, setActiveRoundTournamentId] = useState<string | null>(null);
   const [isSavingTournament, setIsSavingTournament] = useState(false);
   const [tournamentError, setTournamentError] = useState('');
   const [tournamentNotice, setTournamentNotice] = useState('');
-  const [tournamentRoundOptions, setTournamentRoundOptions] = useState<Array<{
-    id: string;
-    alias?: string;
-    scorecardName?: string;
-    totalHoles: number;
-  }>>([]);
+  const [globalSessionFormats, setGlobalSessionFormats] = useState<TournamentSessionFormat[]>([]);
+  const [formatPanelOpen, setFormatPanelOpen] = useState(false);
+  const [editingFormatId, setEditingFormatId] = useState<string | null>(null);
+  const [formatName, setFormatName] = useState('');
+  const [formatBase, setFormatBase] = useState<keyof typeof MATCHUP_FORMAT_LABELS>('singles');
+  const [isSavingFormat, setIsSavingFormat] = useState(false);
+  const [formatMessage, setFormatMessage] = useState('');
+  const [formatError, setFormatError] = useState('');
   const [homeCourseSelection, setHomeCourseSelection] = useState<Scorecard | null>(null);
   const [showRoundInfoPopover, setShowRoundInfoPopover] = useState(false);
   const [availableRounds, setAvailableRounds] = useState<Array<{
@@ -145,12 +173,69 @@ function App() {
   const roundInfoButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const buildDefaultPars = (holes: number) => Array.from({ length: holes }, () => DEFAULT_PAR);
-  const isMatchPlay = competitionType === 'match-play';
+  const allSessionFormats = getTournamentSessionFormats(globalSessionFormats);
+  const defaultFormatId = allSessionFormats[0]?.id ?? 'singles';
+  const createLocalId = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  };
+
+  const normalizeStandaloneFormat = (
+    format: string | undefined
+  ): TournamentMatchupFormat => {
+    if (format === 'match-play') {
+      return 'singles';
+    }
+
+    if (typeof format !== 'string' || !format.trim()) {
+      return defaultFormatId;
+    }
+
+    const exists = allSessionFormats.some((option) => option.id === format);
+    return exists ? format : defaultFormatId;
+  };
+
+  const competitionDefinition = getSessionFormatDefinition(competitionType, globalSessionFormats);
+  const isHeadToHeadFormat = competitionDefinition.baseFormat !== 'stroke';
+  const requiredRoundPlayers = isHeadToHeadFormat
+    ? getSessionFormatPlayerCount(competitionType, globalSessionFormats) * 2
+    : 0;
+  const maxRoundPlayers = isHeadToHeadFormat ? requiredRoundPlayers : 8;
+  const competitionLabel = getSessionFormatLabel(competitionType, globalSessionFormats);
 
   useEffect(() => {
     if (!isFirebaseConfigured) return;
     listScorecards().then(setScorecards).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) {
+      setGlobalSessionFormats([]);
+      return;
+    }
+
+    const unsubscribe = subscribeToGlobalSessionFormats(
+      (formats) => {
+        setGlobalSessionFormats(formats);
+        setFormatError('');
+      },
+      (error) => setFormatError(error.message)
+    );
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const available = getTournamentSessionFormats(globalSessionFormats);
+    if (available.some((option) => option.id === competitionType)) {
+      return;
+    }
+
+    setCompetitionType(available[0]?.id ?? 'singles');
+  }, [globalSessionFormats, competitionType]);
 
   useEffect(() => {
     try {
@@ -178,8 +263,8 @@ function App() {
         setNewRoundStep(session.newRoundStep);
       }
 
-      if (session.competitionType === 'stroke' || session.competitionType === 'match-play') {
-        setCompetitionType(session.competitionType);
+      if (typeof session.competitionType === 'string') {
+        setCompetitionType(normalizeStandaloneFormat(session.competitionType));
       }
 
       if (typeof session.gameStarted === 'boolean') {
@@ -212,6 +297,10 @@ function App() {
 
       if (typeof session.activeTournamentId === 'string') {
         setActiveTournamentId(session.activeTournamentId);
+      }
+
+      if (typeof session.activeRoundTournamentId === 'string' || session.activeRoundTournamentId === null) {
+        setActiveRoundTournamentId(session.activeRoundTournamentId ?? null);
       }
     } catch {
       window.localStorage.removeItem(APP_SESSION_STORAGE_KEY);
@@ -298,12 +387,6 @@ function App() {
     setTournamentNotice('');
     void refreshPlayerProfiles();
     void refreshTournaments();
-
-    if (isFirebaseConfigured) {
-      listRounds()
-        .then(setTournamentRoundOptions)
-        .catch(() => setTournamentRoundOptions([]));
-    }
   };
 
   const saveTournament = async (
@@ -355,6 +438,116 @@ function App() {
     }
   };
 
+  const openFormatPanel = () => {
+    setFormatPanelOpen(true);
+    setEditingFormatId(null);
+    setFormatName('');
+    setFormatBase('singles');
+    setFormatError('');
+    setFormatMessage('');
+  };
+
+  const openEditFormat = (format: TournamentSessionFormat) => {
+    setFormatPanelOpen(true);
+    setEditingFormatId(format.id);
+    setFormatName(format.name);
+    setFormatBase(format.baseFormat);
+    setFormatError('');
+    setFormatMessage('');
+  };
+
+  const closeFormatPanel = () => {
+    setFormatPanelOpen(false);
+    setEditingFormatId(null);
+    setFormatName('');
+    setFormatBase('singles');
+  };
+
+  const saveGlobalFormat = async () => {
+    if (!isFirebaseConfigured) {
+      setFormatError('Firebase is not configured. Add VITE_FIREBASE_* values in .env.local first.');
+      return;
+    }
+
+    const nextName = formatName.trim();
+    if (!nextName) {
+      setFormatError('Enter a format name.');
+      return;
+    }
+
+    const normalizeName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
+    const hasNameConflict = allSessionFormats.some(
+      (format) => format.id !== editingFormatId && normalizeName(format.name) === normalizeName(nextName)
+    );
+    if (hasNameConflict) {
+      setFormatError('Format names must be unique.');
+      return;
+    }
+
+    const nextCustomFormats = editingFormatId
+      ? globalSessionFormats.map((format) =>
+          format.id === editingFormatId
+            ? { ...format, name: nextName, baseFormat: formatBase }
+            : format
+        )
+      : [
+          ...globalSessionFormats,
+          { id: `format-${createLocalId()}`, name: nextName, baseFormat: formatBase },
+        ];
+
+    setIsSavingFormat(true);
+    setFormatError('');
+    setFormatMessage('');
+
+    try {
+      await saveGlobalSessionFormats(nextCustomFormats, clientId);
+      setFormatMessage(editingFormatId ? 'Format updated.' : 'Format created.');
+      closeFormatPanel();
+    } catch (error) {
+      setFormatError(error instanceof Error ? error.message : 'Failed to save format.');
+    } finally {
+      setIsSavingFormat(false);
+    }
+  };
+
+  const deleteGlobalFormat = async (format: TournamentSessionFormat) => {
+    if (!isFirebaseConfigured) {
+      setFormatError('Firebase is not configured. Add VITE_FIREBASE_* values in .env.local first.');
+      return;
+    }
+
+    const isInUse = tournaments.some((tournament) =>
+      (tournament.sessions ?? tournament.rounds ?? []).some((session) => session.format === format.id)
+    );
+
+    if (isInUse) {
+      setFormatError('This format is currently used by a tournament session. Change those sessions first.');
+      return;
+    }
+
+    if (!window.confirm(`Delete format ${format.name}?`)) {
+      return;
+    }
+
+    const nextCustomFormats = globalSessionFormats.filter((item) => item.id !== format.id);
+
+    setIsSavingFormat(true);
+    setFormatError('');
+    setFormatMessage('');
+
+    try {
+      await saveGlobalSessionFormats(nextCustomFormats, clientId);
+      if (editingFormatId === format.id) {
+        closeFormatPanel();
+      }
+      setFormatMessage('Format deleted.');
+    } catch (error) {
+      setFormatError(error instanceof Error ? error.message : 'Failed to delete format.');
+    } finally {
+      setIsSavingFormat(false);
+    }
+  };
+
   useEffect(() => {
     if (!isFirebaseConfigured) return;
     void refreshPlayerProfiles();
@@ -363,6 +556,7 @@ function App() {
 
   const openTournamentDashboard = (tournamentId: string) => {
     setActiveTournamentId(tournamentId);
+    setTournamentViewMode('dashboard');
     setView('tournament');
     void refreshPlayerProfiles();
   };
@@ -459,10 +653,12 @@ function App() {
       selectedScorecard,
       selectedSetIndexes,
       activeTournamentId,
+      activeRoundTournamentId,
     };
 
     window.localStorage.setItem(APP_SESSION_STORAGE_KEY, JSON.stringify(sessionToPersist));
   }, [
+    activeRoundTournamentId,
     activeTournamentId,
     competitionType,
     gameStarted,
@@ -512,29 +708,35 @@ function App() {
   };
 
   const buildMatchupConfig = (players: Player[]) => {
-    if (competitionType !== 'match-play') {
+    if (competitionDefinition.baseFormat === 'stroke') {
       return undefined;
     }
 
-    const playerA = players[0];
-    const playerB = players[1];
+    const sideSize = getSessionFormatPlayerCount(competitionType, globalSessionFormats);
+    const requiredPlayers = sideSize * 2;
+    const selectedPlayers = players.slice(0, requiredPlayers);
 
-    if (!playerA || !playerB) {
+    if (selectedPlayers.length < requiredPlayers) {
       return undefined;
     }
+
+    const sideAPlayers = selectedPlayers.slice(0, sideSize);
+    const sideBPlayers = selectedPlayers.slice(sideSize, requiredPlayers);
+    const sideALabel = sideAPlayers.map((player) => player.name).join(' & ') || 'Side A';
+    const sideBLabel = sideBPlayers.map((player) => player.name).join(' & ') || 'Side B';
 
     return {
-      format: 'match-play' as const,
+      format: competitionDefinition.baseFormat,
       teams: [
         {
           id: 'team-a',
-          name: playerA.name,
-          playerIds: [playerA.id],
+          name: sideALabel,
+          playerIds: sideAPlayers.map((player) => player.id),
         },
         {
           id: 'team-b',
-          name: playerB.name,
-          playerIds: [playerB.id],
+          name: sideBLabel,
+          playerIds: sideBPlayers.map((player) => player.id),
         },
       ],
     };
@@ -631,8 +833,12 @@ function App() {
       return;
     }
 
-    if (isMatchPlay && gameState.players.length >= 2) {
-      setPlayerProfileError('1-on-1 match play requires exactly 2 players.');
+    if (gameState.players.length >= maxRoundPlayers) {
+      setPlayerProfileError(
+        isHeadToHeadFormat
+          ? `${competitionLabel} requires exactly ${requiredRoundPlayers} players.`
+          : 'You can add up to 8 players per round.'
+      );
       return;
     }
 
@@ -1063,12 +1269,15 @@ function App() {
 
   const startGame = () => {
     if (gameState.players.length > 0) {
-      if (isMatchPlay && gameState.players.length !== 2) {
-        setPlayerProfileError('1-on-1 match play requires exactly 2 players.');
+      if (isHeadToHeadFormat && gameState.players.length !== requiredRoundPlayers) {
+        setPlayerProfileError(
+          `${competitionLabel} requires exactly ${requiredRoundPlayers} players.`
+        );
         return;
       }
 
       const initialState = buildInitialRoundState();
+      setActiveRoundTournamentId(null);
       setGameState(initialState);
       setGameStarted(true);
       setView('game');
@@ -1098,6 +1307,7 @@ function App() {
 
   const goHome = () => {
     setView('home');
+    setTournamentViewMode('dashboard');
     setShowRoundInfoPopover(false);
     setShowRoundPlayerForm(false);
     setShowRoundNewPlayerForm(false);
@@ -1119,6 +1329,7 @@ function App() {
       unsubscribeRef.current = null;
     }
     setGameStarted(false);
+    setActiveRoundTournamentId(null);
     setSharedRoundId(null);
     setRoundAlias('');
     setSyncError('');
@@ -1167,14 +1378,17 @@ function App() {
     try {
       const initialState = buildInitialRoundState();
 
-      if (competitionType === 'match-play' && gameState.players.length !== 2) {
-        setSyncError('1-on-1 match play requires exactly 2 players before creating a shared round.');
+      if (isHeadToHeadFormat && gameState.players.length !== requiredRoundPlayers) {
+        setSyncError(
+          `${competitionLabel} requires exactly ${requiredRoundPlayers} players before creating a shared round.`
+        );
         setIsConnectingRound(false);
         return;
       }
 
       const roundId = await createRound(initialState, clientId);
       skipNextSyncRef.current = true;
+      setActiveRoundTournamentId(null);
       setSharedRoundId(roundId);
       setShareNotice(`Shared round created. Code: ${roundId}`);
       setRoundAlias(initialState.alias ?? '');
@@ -1192,16 +1406,16 @@ function App() {
     }
   };
 
-  const joinSharedRound = async () => {
+  const openSharedRound = async (roundCode: string, sourceTournamentId?: string): Promise<boolean> => {
     if (!isFirebaseConfigured) {
       setSyncError('Firebase is not configured. Add VITE_FIREBASE_* values in .env.local first.');
-      return;
+      return false;
     }
 
-    const normalizedRoundId = normalizeRoundId(selectedJoinRoundId);
+    const normalizedRoundId = normalizeRoundId(roundCode);
     if (!normalizedRoundId) {
       setSyncError('Choose a round to join.');
-      return;
+      return false;
     }
 
     setIsConnectingRound(true);
@@ -1214,19 +1428,26 @@ function App() {
       setGameState(remoteState);
       setTotalHoles(remoteState.totalHoles);
       setRoundAlias(remoteState.alias ?? '');
-      setCompetitionType(remoteState.matchup?.format === 'match-play' ? 'match-play' : 'stroke');
+      setCompetitionType(normalizeStandaloneFormat(remoteState.matchup?.format));
+      setActiveRoundTournamentId(sourceTournamentId ?? null);
       subscribeToSharedRound(normalizedRoundId);
       setGameStarted(true);
       setView('game');
       setHomeStep('choose');
       setShareNotice('');
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to join shared round.';
       setSharedRoundId(null);
       setSyncError(message);
+      return false;
     } finally {
       setIsConnectingRound(false);
     }
+  };
+
+  const joinSharedRound = async () => {
+    await openSharedRound(selectedJoinRoundId);
   };
 
   const copyRoundCode = async () => {
@@ -1448,6 +1669,8 @@ function App() {
   );
 
   if (view === 'tournament' && activeTournamentId) {
+    const activeTournament = tournaments.find((t) => t.id === activeTournamentId) ?? null;
+
     return (
       <div className="app">
         <div className="header">
@@ -1456,16 +1679,48 @@ function App() {
           </button>
         </div>
 
-        <TournamentDashboard
-          tournamentId={activeTournamentId}
-          initialTournament={tournaments.find((t) => t.id === activeTournamentId) ?? null}
-          playerProfiles={playerProfiles}
-          clientId={clientId}
-          onManage={() => {
-            setView('home');
-            openTournamentPanel('edit');
-          }}
-        />
+        {tournamentViewMode === 'manage' ? (
+          <>
+            <div className="resume-panel">
+              <div className="resume-info">
+                <strong>{activeTournament?.name || 'Tournament editor'}</strong>
+                <span>Edit tournament details, sessions, and matches.</span>
+              </div>
+              <div className="resume-actions">
+                <button onClick={() => setTournamentViewMode('dashboard')} className="resume-btn">
+                  Back to dashboard
+                </button>
+              </div>
+            </div>
+
+            <TournamentManager
+              mode="edit"
+              tournaments={tournaments}
+              initialTournamentId={activeTournamentId}
+              onCancel={() => setTournamentViewMode('dashboard')}
+              sessionFormats={globalSessionFormats}
+              playerProfiles={playerProfiles}
+              isSaving={isSavingTournament}
+              clientId={clientId}
+              onCreate={handleCreateTournament}
+              onUpdate={handleUpdateTournament}
+              onDelete={handleDeleteTournament}
+            />
+            {tournamentNotice && <p className="share-notice">{tournamentNotice}</p>}
+            {tournamentError && <p className="sync-error">{tournamentError}</p>}
+          </>
+        ) : (
+          <TournamentDashboard
+            tournamentId={activeTournamentId}
+            initialTournament={activeTournament}
+            sessionFormats={globalSessionFormats}
+            playerProfiles={playerProfiles}
+            clientId={clientId}
+            onManage={() => {
+              setTournamentViewMode('manage');
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -1658,6 +1913,100 @@ function App() {
               </div>
 
               <div className="quick-course-panel">
+                <h3>Formats</h3>
+                {!formatPanelOpen ? (
+                  <div className="player-action-row">
+                    <button
+                      type="button"
+                      className="reveal-player-btn"
+                      onClick={openFormatPanel}
+                    >
+                      Add new
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="player-profile-grid">
+                      <input
+                        type="text"
+                        value={formatName}
+                        onChange={(event) => setFormatName(event.target.value)}
+                        placeholder="Format name"
+                        maxLength={40}
+                      />
+                      <div className="field-with-label">
+                        <label htmlFor="global-format-base">Base format</label>
+                        <select
+                          id="global-format-base"
+                          value={formatBase}
+                          onChange={(event) => setFormatBase(event.target.value as keyof typeof MATCHUP_FORMAT_LABELS)}
+                        >
+                          {Object.entries(MATCHUP_FORMAT_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="player-action-row">
+                      <button
+                        type="button"
+                        className="reveal-player-btn"
+                        onClick={saveGlobalFormat}
+                        disabled={isSavingFormat}
+                      >
+                        {isSavingFormat ? 'Saving...' : editingFormatId ? 'Save format' : 'Create format'}
+                      </button>
+                      <button
+                        type="button"
+                        className="reveal-player-btn secondary"
+                        onClick={closeFormatPanel}
+                        disabled={isSavingFormat}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                <p className="quick-player-copy">
+                  Built-in formats are always available. Add custom formats here for all rounds and tournaments.
+                </p>
+
+                {globalSessionFormats.length > 0 && (
+                  <div className="round-picker-list">
+                    {globalSessionFormats.map((format) => (
+                      <div key={format.id} className="round-picker-item">
+                        <span className="round-picker-name">{format.name}</span>
+                        <span className="round-picker-meta">Uses {MATCHUP_FORMAT_LABELS[format.baseFormat]}</span>
+                        <div className="format-item-actions">
+                          <button
+                            type="button"
+                            className="reveal-player-btn secondary"
+                            onClick={() => openEditFormat(format)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="reveal-player-btn secondary"
+                            onClick={() => void deleteGlobalFormat(format)}
+                            disabled={isSavingFormat}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {formatMessage && <p className="share-notice">{formatMessage}</p>}
+                {formatError && <p className="sync-error">{formatError}</p>}
+              </div>
+
+              <div className="quick-course-panel">
                 <h3>Tournaments</h3>
                 {tournamentPanelMode === 'closed' ? (
                   <>
@@ -1692,8 +2041,8 @@ function App() {
                               {tournament.format === 'team' ? 'Team' : 'Individual'} ·{' '}
                               {tournament.entries.length}{' '}
                               {tournament.format === 'team' ? 'teams' : 'players'} ·{' '}
-                              {(tournament.rounds ?? []).length} round
-                              {(tournament.rounds ?? []).length === 1 ? '' : 's'}
+                              {(tournament.sessions ?? tournament.rounds ?? []).length} session
+                              {(tournament.sessions ?? tournament.rounds ?? []).length === 1 ? '' : 's'}
                             </span>
                           </button>
                         ))}
@@ -1705,8 +2054,8 @@ function App() {
                     <TournamentManager
                       mode={tournamentPanelMode}
                       tournaments={tournaments}
+                      sessionFormats={globalSessionFormats}
                       playerProfiles={playerProfiles}
-                      playableRounds={tournamentRoundOptions}
                       isSaving={isSavingTournament}
                       clientId={clientId}
                       onCreate={handleCreateTournament}
@@ -1908,34 +2257,37 @@ function App() {
 
               <div className="input-group">
                 <label>Competition</label>
-                <div className="competition-toggle">
-                  <button
-                    type="button"
-                    className={competitionType === 'stroke' ? 'active' : ''}
-                    onClick={() => {
-                      setCompetitionType('stroke')
-                      setPlayerProfileError('')
-                    }}
-                  >
-                    Stroke round
-                  </button>
-                  <button
-                    type="button"
-                    className={competitionType === 'match-play' ? 'active' : ''}
-                    onClick={() => {
-                      setCompetitionType('match-play')
-                      if (gameState.players.length > 2) {
-                        setPlayerProfileError('1-on-1 match play requires exactly 2 players. Remove players before starting.')
-                      } else {
-                        setPlayerProfileError('')
-                      }
-                    }}
-                  >
-                    1-on-1 match play
-                  </button>
-                </div>
-                {isMatchPlay && (
-                  <p className="sync-note">1-on-1 match play requires exactly 2 players.</p>
+                <select
+                  value={competitionType}
+                  onChange={(event) => {
+                    const nextFormat = normalizeStandaloneFormat(event.target.value);
+                    setCompetitionType(nextFormat);
+
+                    if (nextFormat === 'stroke') {
+                      setPlayerProfileError('');
+                      return;
+                    }
+
+                    const neededPlayers = getSessionFormatPlayerCount(nextFormat, globalSessionFormats) * 2;
+                    if (gameState.players.length > neededPlayers) {
+                      setPlayerProfileError(
+                        `${getSessionFormatLabel(nextFormat, globalSessionFormats)} requires exactly ${neededPlayers} players. Remove players before starting.`
+                      );
+                    } else {
+                      setPlayerProfileError('');
+                    }
+                  }}
+                >
+                  {allSessionFormats.map((formatOption) => (
+                    <option key={formatOption.id} value={formatOption.id}>
+                      {formatOption.name}
+                    </option>
+                  ))}
+                </select>
+                {isHeadToHeadFormat && (
+                  <p className="sync-note">
+                    {competitionLabel} requires exactly {requiredRoundPlayers} players.
+                  </p>
                 )}
               </div>
 
@@ -2116,7 +2468,10 @@ function App() {
 
               <button
                 onClick={startGame}
-                disabled={gameState.players.length === 0 || (isMatchPlay && gameState.players.length !== 2)}
+                disabled={
+                  gameState.players.length === 0 ||
+                  (isHeadToHeadFormat && gameState.players.length !== requiredRoundPlayers)
+                }
                 className="start-btn"
               >
                 Start round
@@ -2128,7 +2483,7 @@ function App() {
                   disabled={
                     isConnectingRound ||
                     gameState.players.length === 0 ||
-                    (isMatchPlay && gameState.players.length !== 2) ||
+                    (isHeadToHeadFormat && gameState.players.length !== requiredRoundPlayers) ||
                     !isFirebaseConfigured
                   }
                   className="share-btn"
@@ -2170,12 +2525,15 @@ function App() {
     gameState.players.length > 0
       ? resolvedPlayers.map((player) => player.name).join(', ')
       : 'No players';
-  const matchupLabel =
-    gameState.matchup?.format === 'match-play' ? '1-on-1 match play' : 'Stroke play';
+  const matchupLabel = getSessionFormatLabel(competitionType, globalSessionFormats);
   // Prefer the saved course's current name so renames show up in existing rounds.
   const liveCourseName =
     scorecards.find((sc) => sc.id === gameState.scorecardId)?.name || gameState.scorecardName;
   const roundTitle = roundAlias || liveCourseName || 'Round in progress';
+  const activeRoundTournament =
+    activeRoundTournamentId
+      ? tournaments.find((tournament) => tournament.id === activeRoundTournamentId) ?? null
+      : null;
 
   return (
     <div className="app">
@@ -2239,7 +2597,7 @@ function App() {
                     type="button"
                     className="round-player-add-btn"
                     onClick={openRoundPlayerPicker}
-                    disabled={gameState.players.length >= 8 || (isMatchPlay && gameState.players.length >= 2)}
+                    disabled={gameState.players.length >= maxRoundPlayers}
                   >
                     Add player
                   </button>
@@ -2354,6 +2712,12 @@ function App() {
         totalHoles={gameState.totalHoles}
         parValues={gameState.parValues ?? buildDefaultPars(gameState.totalHoles)}
         roundTitle={roundTitle}
+        tournamentName={activeRoundTournament?.name}
+        onTournamentLinkClick={
+          activeRoundTournamentId
+            ? () => openTournamentDashboard(activeRoundTournamentId)
+            : undefined
+        }
         holeDetails={gameState.holeDetails}
         courseName={liveCourseName}
         setLabels={gameState.playedSetLabels}

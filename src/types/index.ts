@@ -47,7 +47,8 @@ export interface PlayerProfile {
   isPublic?: boolean;
 }
 
-export type MatchupFormat = 'stroke' | 'match-play';
+// Legacy "match-play" rounds are treated as singles match play.
+export type MatchupFormat = BuiltInTournamentMatchupFormat | 'match-play';
 
 export interface MatchupTeam {
   id: string;
@@ -93,16 +94,28 @@ export interface Tournament {
   format: TournamentFormat;
   tierMode: TierAssignmentMode;
   entries: TournamentEntry[];
-  rounds: TournamentRound[];
+  sessions: TournamentSession[];
+  sessionFormats?: TournamentSessionFormat[];
+  // Legacy field kept for backward compatibility with older UI code.
+  rounds?: TournamentSession[];
   createdBy?: string;
 }
 
-export type TournamentMatchupFormat =
+export type BuiltInTournamentMatchupFormat =
   | 'singles'
   | 'four-ball'
   | 'foursomes'
   | 'scramble'
   | 'stroke';
+
+// Session format ids can be built-in or custom tournament-defined ids.
+export type TournamentMatchupFormat = string;
+
+export interface TournamentSessionFormat {
+  id: string;
+  name: string;
+  baseFormat: BuiltInTournamentMatchupFormat;
+}
 
 export interface MatchupSide {
   entryId: string;
@@ -113,16 +126,17 @@ export interface MatchupSide {
 
 export interface TournamentMatchup {
   id: string;
-  format: TournamentMatchupFormat;
-  // Only confirmed games count toward the official leaderboard.
+  // Only confirmed matches count toward the official leaderboard.
   confirmed?: boolean;
   sides: MatchupSide[];
 }
 
-export interface TournamentRound {
+export interface TournamentSession {
   id: string;
   name: string;
-  // Round code of the played Golphy round this maps to, when one exists.
-  roundId?: string;
+  format: TournamentMatchupFormat;
   matchups: TournamentMatchup[];
 }
+
+// Backward-compatible alias while we migrate module names and props.
+export type TournamentRound = TournamentSession;

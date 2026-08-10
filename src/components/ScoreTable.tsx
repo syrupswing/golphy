@@ -8,12 +8,20 @@ interface ScoreTableProps {
   totalHoles: number;
   parValues: number[];
   roundTitle?: string;
+  tournamentName?: string;
+  onTournamentLinkClick?: () => void;
   holeDetails?: HoleInfo[];
   courseName?: string;
   setLabels?: string[];
   matchup?: MatchupConfig;
   onScoreUpdate?: (playerId: string, hole: number, strokes: number) => void;
 }
+
+const isSinglesMatchPlayFormat = (format: string | undefined): boolean =>
+  format === 'match-play' || format === 'singles';
+
+const isHeadToHeadSideFormat = (format: string | undefined): boolean =>
+  Boolean(format) && format !== 'stroke';
 
 const PLAYER_COLUMN_MIN_WIDTH = 44;
 const PLAYER_COLUMN_MAX_WIDTH = 280;
@@ -92,7 +100,7 @@ function MatchChevron({ direction }: { direction: 'up' | 'down' }) {
   );
 }
 
-export default function ScoreTable({ players, scores, totalHoles, parValues, roundTitle, holeDetails, courseName, setLabels, matchup, onScoreUpdate }: ScoreTableProps) {
+export default function ScoreTable({ players, scores, totalHoles, parValues, roundTitle, tournamentName, onTournamentLinkClick, holeDetails, courseName, setLabels, matchup, onScoreUpdate }: ScoreTableProps) {
   const [hasHorizontalScrollOffset, setHasHorizontalScrollOffset] = React.useState(false);
   const [playerColumnWidth, setPlayerColumnWidth] = React.useState(() => {
     try {
@@ -195,38 +203,87 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     return score ? score.strokes : null;
   };
 
-  const matchPlayOpponents = React.useMemo((): Record<string, string> => {
-    if (matchup?.format !== 'match-play' || matchup.teams.length < 2) {
+  const playerTeamNames = React.useMemo((): Record<string, string> => {
+    if (!matchup?.teams?.length) {
       return {};
     }
 
-    const sideA = matchup.teams[0].playerIds;
-    const sideB = matchup.teams[1].playerIds;
-    if (sideA.length === 0 || sideB.length === 0) {
-      return {};
-    }
+    const teamNamesByPlayer: Record<string, string> = {};
 
-    const pairings: Record<string, string> = {};
-    sideA.forEach((playerId) => {
-      pairings[playerId] = sideB[0];
-    });
-    sideB.forEach((playerId) => {
-      pairings[playerId] = sideA[0];
+    matchup.teams.forEach((team) => {
+      const teamName = team.name.trim();
+      if (!teamName) {
+        return;
+      }
+
+      team.playerIds.forEach((playerId) => {
+        teamNamesByPlayer[playerId] = teamName;
+      });
     });
 
-    return pairings;
+    return teamNamesByPlayer;
   }, [matchup]);
 
-  const isMatchPlay = Object.keys(matchPlayOpponents).length > 0;
+  const isLikelyTournamentRound = React.useMemo((): boolean => {
+    if (!matchup?.teams?.length) {
+      return false;
+    }
 
-  // Strokes go to the higher handicap player, allocated to the hardest holes by stroke index.
-  const matchPlayStrokes = React.useMemo((): { playerId: string; byHole: Record<number, number> } | null => {
-    if (matchup?.format !== 'match-play' || matchup.teams.length < 2) {
+    return matchup.teams.some((team) => {
+      const teamName = team.name.trim().toLowerCase();
+      if (!teamName) {
+        return false;
+      }
+
+      if (team.playerIds.length !== 1) {
+        return true;
+      }
+
+      const player = players.find((candidate) => candidate.id === team.playerIds[0]);
+      if (!player) {
+        return true;
+      }
+
+      return teamName !== player.name.trim().toLowerCase();
+    });
+  }, [matchup, players]);
+
+  const matchupSides = React.useMemo(() => {
+    const activeMatchup = matchup;
+    if (!activeMatchup || !isHeadToHeadSideFormat(activeMatchup.format) || activeMatchup.teams.length < 2) {
       return null;
     }
 
-    const playerAId = matchup.teams[0].playerIds[0];
-    const playerBId = matchup.teams[1].playerIds[0];
+    const topPlayerIds = activeMatchup.teams[0].playerIds.filter(Boolean);
+    const bottomPlayerIds = activeMatchup.teams[1].playerIds.filter(Boolean);
+    if (topPlayerIds.length === 0 || bottomPlayerIds.length === 0) {
+      return null;
+    }
+
+    return {
+      format: activeMatchup.format,
+      topPlayerIds,
+      bottomPlayerIds,
+      splitAfterId: topPlayerIds.at(-1) ?? topPlayerIds[0],
+    };
+  }, [matchup]);
+
+  const isSinglesHeadToHead =
+    matchupSides !== null &&
+    isSinglesMatchPlayFormat(matchupSides.format) &&
+    matchupSides.topPlayerIds.length === 1 &&
+    matchupSides.bottomPlayerIds.length === 1;
+
+  const isMatchPlay = Boolean(matchupSides);
+
+  // Strokes go to the higher handicap player, allocated to the hardest holes by stroke index.
+  const matchPlayStrokes = React.useMemo((): { playerId: string; byHole: Record<number, number> } | null => {
+    if (!isSinglesHeadToHead || !matchupSides) {
+      return null;
+    }
+
+    const playerAId = matchupSides.topPlayerIds[0];
+    const playerBId = matchupSides.bottomPlayerIds[0];
     const handicapA = players.find((player) => player.id === playerAId)?.handicap;
     const handicapB = players.find((player) => player.id === playerBId)?.handicap;
 
@@ -265,7 +322,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
       playerId: (handicapA as number) > (handicapB as number) ? playerAId : playerBId,
       byHole,
     };
-  }, [matchup, players, holeDetails, totalHoles]);
+  }, [holeDetails, isSinglesHeadToHead, matchupSides, players, totalHoles]);
 
   const getStrokesGiven = (playerId: string, hole: number): number =>
     matchPlayStrokes?.playerId === playerId ? matchPlayStrokes.byHole[hole] ?? 0 : 0;
@@ -275,30 +332,64 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     return gross ? gross - getStrokesGiven(playerId, hole) : null;
   };
 
-  const matchPlaySides = React.useMemo(() => {
-    if (matchup?.format !== 'match-play' || matchup.teams.length < 2) {
+  const playerSideIndex = React.useMemo((): Record<string, 0 | 1> => {
+    if (!matchupSides) {
+      return {};
+    }
+
+    const sideByPlayer: Record<string, 0 | 1> = {};
+    matchupSides.topPlayerIds.forEach((playerId) => {
+      sideByPlayer[playerId] = 0;
+    });
+    matchupSides.bottomPlayerIds.forEach((playerId) => {
+      sideByPlayer[playerId] = 1;
+    });
+
+    return sideByPlayer;
+  }, [matchupSides]);
+
+  const getComparableScore = (playerId: string, hole: number): number | null => {
+    if (isSinglesHeadToHead) {
+      return getNetScore(playerId, hole);
+    }
+
+    const gross = getScore(playerId, hole);
+    return gross ?? null;
+  };
+
+  const getSideHoleScore = (sideIndex: 0 | 1, hole: number): number | null => {
+    if (!matchupSides) {
       return null;
     }
 
-    const topId = matchup.teams[0].playerIds[0];
-    const bottomId = matchup.teams[1].playerIds[0];
-    if (!topId || !bottomId) {
+    const playerIds = sideIndex === 0 ? matchupSides.topPlayerIds : matchupSides.bottomPlayerIds;
+    const sideScores = playerIds
+      .map((playerId) => getComparableScore(playerId, hole))
+      .filter((score): score is number => score !== null);
+
+    if (sideScores.length === 0) {
       return null;
     }
 
-    return { topId, bottomId, splitAfterId: matchup.teams[0].playerIds.at(-1) ?? topId };
-  }, [matchup]);
+    if (matchupSides.format === 'four-ball' || matchupSides.format === 'scramble') {
+      return Math.min(...sideScores);
+    }
+
+    // Foursomes should only have one side score entered; if multiple are filled,
+    // use the best one so accidental duplicate entries do not skew the hole result.
+    if (matchupSides.format === 'foursomes') {
+      return Math.min(...sideScores);
+    }
+
+    return sideScores[0];
+  };
 
   const isHoleComplete = (hole: number): boolean =>
-    Boolean(
-      matchPlaySides &&
-        getScore(matchPlaySides.topId, hole) &&
-        getScore(matchPlaySides.bottomId, hole)
-    );
+    getSideHoleScore(0, hole) !== null && getSideHoleScore(1, hole) !== null;
 
   // Positive means the player above the match row is up.
   const getMatchDeltaThroughHole = (hole: number): number | null => {
-    if (!matchPlaySides) {
+    if (!matchupSides) {
       return null;
     }
 
@@ -306,8 +397,8 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     let holesCounted = 0;
 
     for (let played = 1; played <= hole; played += 1) {
-      const top = getNetScore(matchPlaySides.topId, played);
-      const bottom = getNetScore(matchPlaySides.bottomId, played);
+      const top = getSideHoleScore(0, played);
+      const bottom = getSideHoleScore(1, played);
       if (top === null || bottom === null) {
         continue;
       }
@@ -360,19 +451,19 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
   );
 
   const getMatchPlayOutcome = (playerId: string, hole: number): 'won' | 'lost' | 'halved' | null => {
-    const opponentId = matchPlayOpponents[playerId];
-    if (!opponentId) {
+    const sideIndex = playerSideIndex[playerId];
+    if (sideIndex === undefined) {
       return null;
     }
 
-    const ownStrokes = getNetScore(playerId, hole);
-    const opponentStrokes = getNetScore(opponentId, hole);
-    if (ownStrokes === null || opponentStrokes === null) {
+    const ownScore = getSideHoleScore(sideIndex, hole);
+    const opponentScore = getSideHoleScore(sideIndex === 0 ? 1 : 0, hole);
+    if (ownScore === null || opponentScore === null) {
       return null;
     }
 
-    if (ownStrokes < opponentStrokes) return 'won';
-    if (ownStrokes > opponentStrokes) return 'lost';
+    if (ownScore < opponentScore) return 'won';
+    if (ownScore > opponentScore) return 'lost';
     return 'halved';
   };
 
@@ -534,7 +625,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
             ? ', hole halved'
             : '';
 
-    const strokesGiven = isMatchPlay ? getStrokesGiven(playerId, hole) : 0;
+    const strokesGiven = isSinglesHeadToHead ? getStrokesGiven(playerId, hole) : 0;
     const strokesLabel = strokesGiven > 0 ? `, ${strokesGiven} stroke${strokesGiven > 1 ? 's' : ''} given` : '';
 
     return (
@@ -561,6 +652,22 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
   return (
     <div className="score-table-container">
       {roundTitle && <h2 className="course-name-heading">{roundTitle}</h2>}
+      {tournamentName && (
+        <div className="round-tournament-row">
+          {onTournamentLinkClick && (
+            <button
+              type="button"
+              className="round-tournament-back-btn"
+              onClick={onTournamentLinkClick}
+              aria-label="Back to tournament"
+              title="Back to tournament"
+            >
+              <i className="bi bi-chevron-left" aria-hidden="true" />
+            </button>
+          )}
+          <p className="round-tournament-name">{tournamentName}</p>
+        </div>
+      )}
       <div
         className={`table-wrapper${hasHorizontalScrollOffset ? ' is-scrolled-x' : ''}${isResizingPlayerColumn ? ' is-resizing-col' : ''}`}
         onScroll={handleTableScroll}
@@ -676,7 +783,14 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
               <tr className="player-row">
                 <td className="player-cell">
                   <div className="player-info">
-                    <OverflowFadeText text={player.name} className="player-name" />
+                    <div className="player-meta">
+                      <OverflowFadeText text={player.name} className="player-name" />
+                      {isLikelyTournamentRound &&
+                        playerTeamNames[player.id] &&
+                        playerTeamNames[player.id].trim().toLowerCase() !== player.name.trim().toLowerCase() && (
+                          <OverflowFadeText text={playerTeamNames[player.id]} className="player-team-name" />
+                        )}
+                    </div>
                     {Number.isFinite(player.handicap) && (
                       <span className="player-handicap" title={`Handicap ${player.handicap}`}>
                         {player.handicap}
@@ -698,7 +812,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
                 ))}
                 <td className="total-cell bold"><span className="score-text">{getTotalScore(player.id) || ''}</span></td>
               </tr>
-              {matchPlaySides?.splitAfterId === player.id && renderMatchScoreRow()}
+              {matchupSides?.splitAfterId === player.id && renderMatchScoreRow()}
               </React.Fragment>
             ))}
           </tbody>

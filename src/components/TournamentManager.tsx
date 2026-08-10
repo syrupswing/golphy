@@ -6,24 +6,27 @@ import type {
   Tournament,
   TournamentEntry,
   TournamentFormat,
-  TournamentRound,
+  TournamentSessionFormat,
+  TournamentSession,
 } from '../types/index.ts';
 import {
   makeEntryId,
   REQUIRED_TIER_COUNTS,
-  saveTournamentRounds,
+  saveTournamentSessions,
   subscribeToTournament,
   TEAM_SIZE,
 } from '../firebase/tournaments';
 import type { TournamentInput } from '../firebase/tournaments';
-import TournamentRounds from './TournamentRounds';
+import TournamentSessionsEditor from './TournamentRounds';
 import './TournamentManager.scss';
 
 interface TournamentManagerProps {
   mode: 'add' | 'edit';
   tournaments: Tournament[];
+  initialTournamentId?: string;
+  onCancel?: () => void;
+  sessionFormats?: TournamentSessionFormat[];
   playerProfiles: PlayerProfile[];
-  playableRounds: Array<{ id: string; alias?: string; scorecardName?: string; totalHoles: number }>;
   isSaving: boolean;
   clientId: string;
   onCreate: (input: TournamentInput) => Promise<boolean>;
@@ -44,8 +47,10 @@ const makeEmptyEntry = (): TournamentEntry => ({
 export default function TournamentManager({
   mode,
   tournaments,
+  initialTournamentId,
+  onCancel,
+  sessionFormats = [],
   playerProfiles,
-  playableRounds,
   isSaving,
   clientId,
   onCreate,
@@ -57,10 +62,10 @@ export default function TournamentManager({
   const [format, setFormat] = useState<TournamentFormat>('individual');
   const [tierMode, setTierMode] = useState<TierAssignmentMode>('auto');
   const [entries, setEntries] = useState<TournamentEntry[]>([makeEmptyEntry()]);
-  const [rounds, setRounds] = useState<TournamentRound[]>([]);
+  const [sessions, setSessions] = useState<TournamentSession[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(mode === 'add');
   const [scoreSaveState, setScoreSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  // Rounds arriving from the subscription must not be echoed straight back as a write.
+  // Sessions arriving from the subscription must not be echoed straight back as a write.
   const skipNextAutoSaveRef = useRef(true);
 
   const getHandicap = (playerId: string): number =>
@@ -94,7 +99,7 @@ export default function TournamentManager({
         }
 
         skipNextAutoSaveRef.current = true;
-        setRounds(tournament.rounds ?? []);
+        setSessions(tournament.sessions ?? tournament.rounds ?? []);
       },
       () => {
         // A dropped subscription should not block local scoring.
@@ -103,6 +108,19 @@ export default function TournamentManager({
 
     return unsubscribe;
   }, [editingId, clientId]);
+
+  useEffect(() => {
+    if (mode !== 'edit' || editingId || !initialTournamentId) {
+      return;
+    }
+
+    const initialTournament = tournaments.find((tournament) => tournament.id === initialTournamentId);
+    if (!initialTournament) {
+      return;
+    }
+
+    openTournamentForEditing(initialTournament);
+  }, [mode, editingId, initialTournamentId, tournaments]);
 
   useEffect(() => {
     if (!editingId) {
@@ -116,13 +134,13 @@ export default function TournamentManager({
 
     setScoreSaveState('saving');
     const timeout = window.setTimeout(() => {
-      saveTournamentRounds(editingId, rounds, clientId)
+      saveTournamentSessions(editingId, sessions, clientId)
         .then(() => setScoreSaveState('saved'))
         .catch(() => setScoreSaveState('error'));
     }, 500);
 
     return () => window.clearTimeout(timeout);
-  }, [rounds, editingId, clientId]);
+  }, [sessions, editingId, clientId]);
 
   // Manual mode keeps existing picks and only slots newcomers into whichever tier has room.
   const resolveTiers = (
@@ -160,7 +178,7 @@ export default function TournamentManager({
     setFormat('individual');
     setTierMode('auto');
     setEntries([makeEmptyEntry()]);
-    setRounds([]);
+    setSessions([]);
     setIsFormOpen(mode === 'add');
   };
 
@@ -180,8 +198,8 @@ export default function TournamentManager({
           }))
         : [makeEmptyEntry()]
     );
-    setRounds(
-      (tournament.rounds ?? []).map((round) => ({
+    setSessions(
+      (tournament.sessions ?? tournament.rounds ?? []).map((round) => ({
         ...round,
         matchups: round.matchups.map((matchup) => ({
           ...matchup,
@@ -307,7 +325,7 @@ export default function TournamentManager({
   };
 
   const handleSave = async () => {
-    const input: TournamentInput = { name, format, tierMode, entries, rounds };
+    const input: TournamentInput = { name, format, tierMode, entries, sessions };
     const saved =
       editingId !== null ? await onUpdate(editingId, input) : await onCreate(input);
 
@@ -318,6 +336,20 @@ export default function TournamentManager({
 
   const handleDelete = async () => {
     if (!editingId) return;
+
+    const typedId = window.prompt(
+      'To delete this tournament, enter or paste its database ID exactly:'
+    );
+
+    if (typedId === null) {
+      return;
+    }
+
+    if (typedId.trim() !== editingId) {
+      window.alert('Tournament ID did not match. Delete canceled.');
+      return;
+    }
+
     if (!window.confirm('Delete this tournament? This cannot be undone.')) return;
 
     const deleted = await onDelete(editingId);
@@ -523,12 +555,12 @@ export default function TournamentManager({
             </button>
           </div>
 
-          <TournamentRounds
+          <TournamentSessionsEditor
             entries={entries}
-            rounds={rounds}
+            sessions={sessions}
+            sessionFormats={sessionFormats}
             playerProfiles={playerProfiles}
-            playableRounds={playableRounds}
-            onChange={setRounds}
+            onChange={setSessions}
           />
 
           {editingId && (
@@ -565,7 +597,14 @@ export default function TournamentManager({
             )}
 
             {mode === 'edit' && (
-              <button type="button" className="tournament-cancel" onClick={resetForm}>
+              <button
+                type="button"
+                className="tournament-cancel"
+                onClick={() => {
+                  resetForm();
+                  onCancel?.();
+                }}
+              >
                 Cancel
               </button>
             )}

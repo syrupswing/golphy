@@ -1,18 +1,21 @@
 import type {
+  BuiltInTournamentMatchupFormat,
   MatchupSide,
   Tournament,
   TournamentMatchup,
   TournamentMatchupFormat,
-  TournamentRound,
+  TournamentSessionFormat,
+  TournamentSession,
 } from '../types/index.ts';
 
-export const HOLES_PER_GAME = 9;
+export const HOLES_PER_MATCH = 9;
+export const HOLES_PER_GAME = HOLES_PER_MATCH;
 
-// A won nine-hole game is worth two points; a halved game splits them.
+// A won nine-hole match is worth two points; a halved match splits them.
 export const POINTS_FOR_WIN = 2;
 export const POINTS_FOR_TIE = 1;
 
-export const MATCHUP_FORMAT_LABELS: Record<TournamentMatchupFormat, string> = {
+export const MATCHUP_FORMAT_LABELS: Record<BuiltInTournamentMatchupFormat, string> = {
   singles: 'Singles match play',
   'four-ball': 'Four-ball (best ball)',
   foursomes: 'Foursomes (alternate shot)',
@@ -20,7 +23,7 @@ export const MATCHUP_FORMAT_LABELS: Record<TournamentMatchupFormat, string> = {
   stroke: 'Stroke play',
 };
 
-export const MATCHUP_FORMAT_PLAYER_COUNTS: Record<TournamentMatchupFormat, number> = {
+export const MATCHUP_FORMAT_PLAYER_COUNTS: Record<BuiltInTournamentMatchupFormat, number> = {
   singles: 1,
   'four-ball': 2,
   foursomes: 2,
@@ -28,8 +31,70 @@ export const MATCHUP_FORMAT_PLAYER_COUNTS: Record<TournamentMatchupFormat, numbe
   stroke: 1,
 };
 
+export const DEFAULT_TOURNAMENT_SESSION_FORMATS: TournamentSessionFormat[] = (
+  Object.keys(MATCHUP_FORMAT_LABELS) as BuiltInTournamentMatchupFormat[]
+).map((id) => ({
+  id,
+  name: MATCHUP_FORMAT_LABELS[id],
+  baseFormat: id,
+}));
+
+const normalizeFormatName = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+export const getTournamentSessionFormats = (
+  customFormats: TournamentSessionFormat[] = []
+): TournamentSessionFormat[] => {
+  const defaults = DEFAULT_TOURNAMENT_SESSION_FORMATS;
+  const seenIds = new Set(defaults.map((format) => format.id));
+  const seenNames = new Set(defaults.map((format) => normalizeFormatName(format.name)));
+
+  const sanitizedCustom = customFormats
+    .filter((format) => Boolean(format.id?.trim()) && Boolean(format.name?.trim()))
+    .filter((format) => Boolean(MATCHUP_FORMAT_LABELS[format.baseFormat]))
+    .filter((format) => {
+      const id = format.id.trim();
+      if (seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    })
+    .filter((format) => {
+      const nameKey = normalizeFormatName(format.name);
+      if (seenNames.has(nameKey)) return false;
+      seenNames.add(nameKey);
+      return true;
+    })
+    .map((format) => ({
+      id: format.id.trim(),
+      name: format.name.trim(),
+      baseFormat: format.baseFormat,
+    }));
+
+  return [...defaults, ...sanitizedCustom];
+};
+
+export const getSessionFormatDefinition = (
+  formatId: TournamentMatchupFormat,
+  customFormats: TournamentSessionFormat[] = []
+): TournamentSessionFormat => {
+  const allFormats = getTournamentSessionFormats(customFormats);
+  return allFormats.find((format) => format.id === formatId) ?? allFormats[0];
+};
+
+export const getSessionFormatLabel = (
+  formatId: TournamentMatchupFormat,
+  customFormats: TournamentSessionFormat[] = []
+): string => getSessionFormatDefinition(formatId, customFormats).name;
+
+export const getSessionFormatPlayerCount = (
+  formatId: TournamentMatchupFormat,
+  customFormats: TournamentSessionFormat[] = []
+): number => {
+  const resolved = getSessionFormatDefinition(formatId, customFormats);
+  return MATCHUP_FORMAT_PLAYER_COUNTS[resolved.baseFormat];
+};
+
 // Every format except stroke play is decided hole by hole.
-const isStrokeFormat = (format: TournamentMatchupFormat): boolean => format === 'stroke';
+const isStrokeFormat = (baseFormat: BuiltInTournamentMatchupFormat): boolean => baseFormat === 'stroke';
 
 export interface MatchupResult {
   isComplete: boolean;
@@ -46,13 +111,18 @@ const getHoleScore = (side: MatchupSide | undefined, hole: number): number => {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 };
 
-export const resolveMatchup = (matchup: TournamentMatchup): MatchupResult => {
+export const resolveMatchup = (
+  matchup: TournamentMatchup,
+  formatId: TournamentMatchupFormat,
+  customFormats: TournamentSessionFormat[] = []
+): MatchupResult => {
+  const format = getSessionFormatDefinition(formatId, customFormats);
   const [sideA, sideB] = matchup.sides;
   const holesWon: [number, number] = [0, 0];
   const totals: [number, number] = [0, 0];
   let holesPlayed = 0;
 
-  for (let hole = 0; hole < HOLES_PER_GAME; hole += 1) {
+  for (let hole = 0; hole < HOLES_PER_MATCH; hole += 1) {
     const scoreA = getHoleScore(sideA, hole);
     const scoreB = getHoleScore(sideB, hole);
 
@@ -68,7 +138,7 @@ export const resolveMatchup = (matchup: TournamentMatchup): MatchupResult => {
     else if (scoreB < scoreA) holesWon[1] += 1;
   }
 
-  const isComplete = holesPlayed === HOLES_PER_GAME;
+  const isComplete = holesPlayed === HOLES_PER_MATCH;
 
   if (holesPlayed === 0) {
     return {
@@ -82,14 +152,14 @@ export const resolveMatchup = (matchup: TournamentMatchup): MatchupResult => {
     };
   }
 
-  const [metricA, metricB] = isStrokeFormat(matchup.format)
+  const [metricA, metricB] = isStrokeFormat(format.baseFormat)
     ? [totals[1], totals[0]] // Lower total wins, so invert for a shared comparison.
     : [holesWon[0], holesWon[1]];
 
   const isTie = metricA === metricB;
   const winningSideIndex = isTie ? null : metricA > metricB ? 0 : 1;
 
-  const summary = isStrokeFormat(matchup.format)
+  const summary = isStrokeFormat(format.baseFormat)
     ? `${totals[0]} v ${totals[1]}`
     : isTie
       ? `All square through ${holesPlayed}`
@@ -107,31 +177,42 @@ const createLocalId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
-export const createEmptyMatchup = (
-  format: TournamentMatchupFormat = 'singles'
-): TournamentMatchup => ({
+export const createEmptyMatchup = (): TournamentMatchup => ({
   id: createLocalId(),
-  format,
   confirmed: false,
   sides: [
-    { entryId: '', playerIds: [], scores: Array(HOLES_PER_GAME).fill(0) },
-    { entryId: '', playerIds: [], scores: Array(HOLES_PER_GAME).fill(0) },
+    { entryId: '', playerIds: [], scores: Array(HOLES_PER_MATCH).fill(0) },
+    { entryId: '', playerIds: [], scores: Array(HOLES_PER_MATCH).fill(0) },
   ],
 });
 
-export const createEmptyRound = (existingCount: number): TournamentRound => ({
+export const createEmptySession = (existingCount: number): TournamentSession => ({
   id: createLocalId(),
-  name: `Round ${existingCount + 1}`,
-  roundId: '',
-  matchups: [createEmptyMatchup()],
+  name: `Session ${existingCount + 1}`,
+  format: 'singles',
+  matchups: [],
 });
+
+export const createSessionWithConfig = (
+  existingCount: number,
+  name: string,
+  format: TournamentMatchupFormat
+): TournamentSession => ({
+  id: createLocalId(),
+  name: name.trim() || `Session ${existingCount + 1}`,
+  format,
+  matchups: [],
+});
+
+// Backward-compatible alias while callers migrate terminology.
+export const createEmptyRound = createEmptySession;
 
 export interface StandingRow {
   entryId: string;
   points: number;
   projectedPoints: number;
-  gamesPlayed: number;
-  confirmedGames: number;
+  matchesPlayed: number;
+  confirmedMatches: number;
   wins: number;
   ties: number;
   losses: number;
@@ -148,8 +229,8 @@ export const calculateStandings = (tournament: Tournament): StandingRow[] => {
       entryId,
       points: 0,
       projectedPoints: 0,
-      gamesPlayed: 0,
-      confirmedGames: 0,
+      matchesPlayed: 0,
+      confirmedMatches: 0,
       wins: 0,
       ties: 0,
       losses: 0,
@@ -160,9 +241,11 @@ export const calculateStandings = (tournament: Tournament): StandingRow[] => {
 
   tournament.entries.forEach((entry) => rowFor(entry.id));
 
-  tournament.rounds?.forEach((round) => {
-    round.matchups.forEach((matchup) => {
-      const result = resolveMatchup(matchup);
+  const sessions = tournament.sessions ?? tournament.rounds ?? [];
+
+  sessions.forEach((session) => {
+    session.matchups.forEach((matchup) => {
+      const result = resolveMatchup(matchup, session.format, tournament.sessionFormats ?? []);
       if (result.holesPlayed === 0) {
         return;
       }
@@ -177,14 +260,14 @@ export const calculateStandings = (tournament: Tournament): StandingRow[] => {
             ? POINTS_FOR_WIN
             : 0;
 
-        row.gamesPlayed += 1;
+        row.matchesPlayed += 1;
         row.projectedPoints += earned;
 
         if (!matchup.confirmed) {
           return;
         }
 
-        row.confirmedGames += 1;
+        row.confirmedMatches += 1;
         row.points += earned;
 
         if (result.isTie) row.ties += 1;
