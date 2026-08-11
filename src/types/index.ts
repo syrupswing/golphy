@@ -58,6 +58,9 @@ export interface MatchupTeam {
 
 export interface MatchupConfig {
   format: MatchupFormat;
+  sessionFormatId?: string;
+  scoringMode?: SessionScoringMode;
+  resultMode?: SessionResultMode;
   teams: MatchupTeam[];
   ownBall?: boolean;
   handicapRule?: {
@@ -65,6 +68,7 @@ export interface MatchupConfig {
     lowPercentage: number;
     highPercentage: number;
     rounding: 'nearest' | 'up' | 'down';
+    prorateByHoles?: boolean;
   };
 }
 
@@ -73,6 +77,7 @@ export interface GameState {
   scores: Score[];
   currentHole: number;
   totalHoles: number;
+  sessionFormatId?: string;
   alias?: string;
   parValues?: number[];
   holeDetails?: HoleInfo[];
@@ -129,6 +134,7 @@ export interface ScramblePairPercentageHandicapRule {
   lowPercentage: number;
   highPercentage: number;
   rounding: 'nearest' | 'up' | 'down';
+  prorateByHoles?: boolean;
 }
 
 export type SessionHandicapRule = ScramblePairPercentageHandicapRule;

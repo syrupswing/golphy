@@ -270,8 +270,15 @@ function App() {
         setNewRoundStep(session.newRoundStep);
       }
 
-      if (typeof session.competitionType === 'string') {
-        setCompetitionType(normalizeStandaloneFormat(session.competitionType));
+      const restoredFormatId =
+        typeof session.gameState?.sessionFormatId === 'string'
+          ? session.gameState.sessionFormatId
+          : session.gameState?.matchup?.sessionFormatId ??
+            session.gameState?.matchup?.format ??
+            session.competitionType;
+
+      if (typeof restoredFormatId === 'string') {
+        setCompetitionType(normalizeStandaloneFormat(restoredFormatId));
       }
 
       if (typeof session.gameStarted === 'boolean') {
@@ -734,6 +741,13 @@ function App() {
         skipNextSyncRef.current = true;
         setGameState(remoteState);
         setTotalHoles(remoteState.totalHoles);
+        setCompetitionType(
+          normalizeStandaloneFormat(
+            remoteState.sessionFormatId ??
+            remoteState.matchup?.sessionFormatId ??
+            remoteState.matchup?.format
+          )
+        );
         setGameStarted(true);
         setView('game');
         setHomeStep('choose');
@@ -770,6 +784,9 @@ function App() {
 
     return {
       format: competitionDefinition.baseFormat,
+      sessionFormatId: competitionType,
+      scoringMode: competitionDefinition.scoringMode,
+      resultMode: competitionDefinition.resultMode,
       ownBall: competitionDefinition.ownBall,
       teams: [
         {
@@ -790,6 +807,7 @@ function App() {
               lowPercentage: competitionDefinition.handicapRule.lowPercentage,
               highPercentage: competitionDefinition.handicapRule.highPercentage,
               rounding: competitionDefinition.handicapRule.rounding,
+              prorateByHoles: competitionDefinition.handicapRule.prorateByHoles,
             }
           : undefined,
     };
@@ -1307,6 +1325,7 @@ function App() {
       ...gameState,
       currentHole: 1,
       totalHoles,
+      sessionFormatId: competitionType,
       alias: roundAlias.trim() || undefined,
       parValues: parValues && parValues.length > 0 ? parValues : buildDefaultPars(totalHoles),
       holeDetails:
@@ -1481,7 +1500,13 @@ function App() {
       setGameState(remoteState);
       setTotalHoles(remoteState.totalHoles);
       setRoundAlias(remoteState.alias ?? '');
-      setCompetitionType(normalizeStandaloneFormat(remoteState.matchup?.format));
+      setCompetitionType(
+        normalizeStandaloneFormat(
+          remoteState.sessionFormatId ??
+          remoteState.matchup?.sessionFormatId ??
+          remoteState.matchup?.format
+        )
+      );
       setActiveRoundTournamentId(sourceTournamentId ?? null);
       subscribeToSharedRound(normalizedRoundId);
       setGameStarted(true);

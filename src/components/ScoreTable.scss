@@ -411,7 +411,7 @@
     .player-row {
       color: #888;
       font-family: 'Nanum Brush Script', cursive;
-      font-size: 32px;
+      font-size: 28px;
       line-height: 1;
 
       .player-cell {
@@ -544,7 +544,7 @@
           align-items: center;
           justify-content: center;
           font-family: 'Nanum Brush Script', cursive;
-          font-size: 40px;
+          font-size: 36px;
           line-height: 1;
           text-align: center;
           border: none;
@@ -556,6 +556,26 @@
             outline: 2px solid $primary-color;
             z-index: 10;
             outline-offset: -2px;
+          }
+
+          .score-net-wrapper {
+            position: relative;
+            display: inline-block;
+            line-height: 1;
+
+            .score-text.gross.is-net-adjusted {
+              text-decoration: line-through;
+              text-decoration-thickness: 1.5px;
+              text-decoration-color: color.adjust($gray, $lightness: -8%);
+              opacity: 0.78;
+              font-size: 24px;
+              line-height: 1;
+              transform: none;
+              position: absolute;
+              top: -7px;
+              right: -16px;
+              z-index: 2;
+            }
           }
         }
 
@@ -602,6 +622,75 @@
             }
         }
 
+        &.has-net-stack {
+          &::before,
+          &::after {
+            display: none;
+          }
+
+          .score-text.net {
+            position: relative;
+            transform: translate(-4px, 4px);
+            z-index: 1;
+          }
+
+          &.birdie,
+          &.eagle,
+          &.bogey,
+          &.double-bogey {
+            .score-text.net {
+              &::before,
+              &::after {
+                box-sizing: content-box;
+                content: ' ';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                height: 0;
+                border: 1px solid $gray;
+                pointer-events: none;
+              }
+            }
+          }
+
+          &.birdie,
+          &.eagle {
+            .score-text.net {
+              &::before,
+              &::after {
+                border-radius: 50%;
+              }
+            }
+          }
+
+          &.birdie,
+          &.eagle,
+          &.bogey,
+          &.double-bogey {
+            .score-text.net::before {
+              width: 32px;
+              padding-bottom: 34px;
+              margin: -18px 0 0 -17px;
+            }
+          }
+
+          &.eagle,
+          &.double-bogey {
+            .score-text.net::after {
+              width: 26px;
+              padding-bottom: 28px;
+              margin: -15px 0 0 -14px;
+            }
+          }
+
+          &.birdie,
+          &.bogey {
+            .score-text.net::after {
+              display: none;
+            }
+          }
+        }
+
         &.match-play {
           &.hole-won {
             &::before {
@@ -643,6 +732,34 @@
         background: $light-color;
         font-weight: 600;
 
+        .score-total-stack {
+          position: relative;
+          display: inline-block;
+          line-height: 1;
+
+          .score-text.gross.is-net-adjusted {
+            position: absolute;
+            top: -8px;
+            right: -18px;
+            transform: none;
+            font-size: 24px;
+            font-weight: 500;
+            line-height: 1;
+            text-decoration: line-through;
+            text-decoration-thickness: 1.5px;
+            text-decoration-color: color.adjust($gray, $lightness: -8%);
+            opacity: 0.78;
+            z-index: 2;
+          }
+
+          .score-text.net {
+            transform: none;
+            font-size: inherit;
+            line-height: 1;
+            transform: translate(-4px, 4px);
+          }
+        }
+
         &.bold {
           background: color.adjust($primary-color, $lightness: 35%);
           font-weight: 600;
@@ -653,6 +770,12 @@
         transform: translateY(2px);
         color: inherit;
         line-height: 1;
+
+        &.net {
+          transform: none;
+          font-size: inherit;
+          line-height: 1;
+        }
       }
     }
   }

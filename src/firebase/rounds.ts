@@ -18,6 +18,7 @@ interface RoundDocument {
   scores: Score[];
   currentHole: number;
   totalHoles: number;
+  sessionFormatId?: string;
   alias?: string;
   parValues?: number[];
   holeDetails?: HoleInfo[];
@@ -59,6 +60,7 @@ const toRoundDocument = (state: GameState, clientId: string): RoundDocument => (
   scores: state.scores,
   currentHole: state.currentHole,
   totalHoles: state.totalHoles,
+  sessionFormatId: state.sessionFormatId ?? '',
   alias: state.alias ?? '',
   parValues: state.parValues ?? [],
   holeDetails: state.holeDetails ?? [],
@@ -75,6 +77,7 @@ const parseRoundDocument = (data: RoundDocument): GameState => ({
   scores: data.scores ?? [],
   currentHole: data.currentHole ?? 1,
   totalHoles: data.totalHoles ?? 18,
+  sessionFormatId: data.sessionFormatId || undefined,
   alias: data.alias ?? '',
   parValues: data.parValues?.length ? data.parValues : undefined,
   holeDetails: data.holeDetails?.length ? data.holeDetails : undefined,
@@ -200,6 +203,7 @@ export const updateRound = async (
       scores: state.scores,
       currentHole: state.currentHole,
       totalHoles: state.totalHoles,
+      sessionFormatId: state.sessionFormatId ?? '',
       alias: state.alias ?? '',
       parValues: state.parValues ?? [],
       holeDetails: state.holeDetails ?? [],

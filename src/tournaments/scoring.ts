@@ -37,6 +37,7 @@ export const MATCHUP_FORMAT_PLAYER_COUNTS: Record<BuiltInTournamentMatchupFormat
 };
 
 export const TEAM_MATCH_PLAY_SCRAMBLE_FORMAT_ID = 'team-match-play-scramble';
+export const TEAM_STROKE_SCRAMBLE_FORMAT_ID = 'team-stroke-scramble';
 
 const BASE_SCORING_MODE: Record<BuiltInTournamentMatchupFormat, SessionScoringMode> = {
   singles: 'match',
@@ -139,6 +140,7 @@ const normalizeHandicapRule = (value: unknown): SessionHandicapRule | undefined 
     lowPercentage: normalizePercentage(candidate.lowPercentage, 0.35),
     highPercentage: normalizePercentage(candidate.highPercentage, 0.15),
     rounding,
+    prorateByHoles: candidate.prorateByHoles !== false,
   };
 };
 
@@ -174,7 +176,7 @@ export const DEFAULT_TOURNAMENT_SESSION_FORMATS: TournamentSessionFormat[] = (
 ).concat([
   normalizeSessionFormat({
     id: TEAM_MATCH_PLAY_SCRAMBLE_FORMAT_ID,
-    name: 'Team match play scramble',
+    name: 'Team scramble match play',
     baseFormat: 'scramble',
     scoringMode: 'match',
     useHandicaps: true,
@@ -188,6 +190,26 @@ export const DEFAULT_TOURNAMENT_SESSION_FORMATS: TournamentSessionFormat[] = (
       lowPercentage: 0.35,
       highPercentage: 0.15,
       rounding: 'nearest',
+      prorateByHoles: true,
+    },
+  }),
+  normalizeSessionFormat({
+    id: TEAM_STROKE_SCRAMBLE_FORMAT_ID,
+    name: 'Team scramble stroke play',
+    baseFormat: 'scramble',
+    scoringMode: 'stroke',
+    useHandicaps: true,
+    hasTeams: true,
+    ownBall: false,
+    playersPerSide: 2,
+    resultMode: 'net-total',
+    lineupRule: 'any',
+    handicapRule: {
+      type: 'scramble-pair-percentage',
+      lowPercentage: 0.35,
+      highPercentage: 0.15,
+      rounding: 'nearest',
+      prorateByHoles: false,
     },
   }),
 ]);
@@ -323,8 +345,10 @@ const calculateSideHandicap = (
 
   const [low, high] = handicaps;
   const baseTeamHandicap = low * rule.lowPercentage + high * rule.highPercentage;
-  const proratedTeamHandicap = prorateHandicapByHoles(baseTeamHandicap, context.holesInMatch ?? HOLES_PER_MATCH);
-  return applyRoundRule(proratedTeamHandicap, rule.rounding);
+  const effectiveHandicap = rule.prorateByHoles !== false
+    ? prorateHandicapByHoles(baseTeamHandicap, context.holesInMatch ?? HOLES_PER_MATCH)
+    : baseTeamHandicap;
+  return applyRoundRule(effectiveHandicap, rule.rounding);
 };
 
 const calculateHandicapAllowances = (

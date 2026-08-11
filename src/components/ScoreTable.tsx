@@ -311,7 +311,10 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     matchupSides.bottomPlayerIds.length >= 2 &&
     matchup?.handicapRule?.type === 'scramble-pair-percentage';
 
-  const isMatchPlay = Boolean(matchupSides);
+  const isMatchPlay =
+    Boolean(matchupSides) &&
+    (matchup?.scoringMode ? matchup.scoringMode === 'match' : true) &&
+    (matchup?.resultMode ? matchup.resultMode === 'holes' : true);
 
   // Strokes go to the higher handicap player, allocated to the hardest holes by stroke index.
   const matchPlayStrokes = React.useMemo((): { playerId: string; byHole: Record<number, number> } | null => {
@@ -376,7 +379,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
         weightedLow: number;
         weightedHigh: number;
         rawTeamHandicap: number;
-        proratedTeamHandicap: number;
+        effectiveTeamHandicap: number;
       },
       {
         playerNames: [string, string];
@@ -384,7 +387,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
         weightedLow: number;
         weightedHigh: number;
         rawTeamHandicap: number;
-        proratedTeamHandicap: number;
+        effectiveTeamHandicap: number;
       }
     ];
   } | null => {
@@ -411,8 +414,10 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
       const weightedLow = low * handicapRule.lowPercentage;
       const weightedHigh = high * handicapRule.highPercentage;
       const rawTeamHandicap = weightedLow + weightedHigh;
-      const proratedTeamHandicap = prorateHandicapByHoles(rawTeamHandicap, totalHoles);
-      const roundedTeamHandicap = applyRoundRule(proratedTeamHandicap, handicapRule.rounding);
+      const effectiveTeamHandicap = handicapRule.prorateByHoles !== false
+        ? prorateHandicapByHoles(rawTeamHandicap, totalHoles)
+        : rawTeamHandicap;
+      const roundedTeamHandicap = applyRoundRule(effectiveTeamHandicap, handicapRule.rounding);
 
       return {
         roundedTeamHandicap,
@@ -422,7 +427,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
           weightedLow,
           weightedHigh,
           rawTeamHandicap,
-          proratedTeamHandicap,
+          effectiveTeamHandicap,
         },
       };
     };
@@ -687,6 +692,24 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     return null;
   };
 
+  const getRowStrokesGiven = (row: ScoreRow, hole: number): number => {
+    const teamStrokesGiven =
+      scrambleSideStrokes && row.sideIndex !== undefined
+        ? getSideStrokesGiven(row.sideIndex, hole)
+        : 0;
+
+    return isSinglesHeadToHead ? getStrokesGiven(row.primaryPlayerId, hole) : teamStrokesGiven;
+  };
+
+  const getRowNetScore = (row: ScoreRow, hole: number): number | null => {
+    const gross = getRowScore(row, hole);
+    if (gross === null) {
+      return null;
+    }
+
+    return gross - getRowStrokesGiven(row, hole);
+  };
+
   const getRowHoleScoreValue = (row: ScoreRow, hole: number): number => getRowScore(row, hole) ?? 0;
 
   const getRowSegmentScore = (row: ScoreRow, start: number, end: number): number => {
@@ -695,6 +718,32 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
       total += getRowHoleScoreValue(row, hole);
     }
     return total;
+  };
+
+  const getRowSegmentNetScore = (row: ScoreRow, start: number, end: number): number => {
+    let total = 0;
+    for (let hole = start; hole <= end; hole += 1) {
+      const net = getRowNetScore(row, hole);
+      if (net !== null) {
+        total += net;
+      }
+    }
+    return total;
+  };
+
+  const rowHasAnyScoredHandicapHole = (row: ScoreRow): boolean => {
+    if (isMatchPlay) {
+      return false;
+    }
+
+    for (let hole = 1; hole <= totalHoles; hole += 1) {
+      const gross = getRowScore(row, hole);
+      if (gross !== null && getRowStrokesGiven(row, hole) > 0) {
+        return true;
+      }
+    }
+
+    return false;
   };
 
   const getRowTotalScore = (row: ScoreRow): number => getRowSegmentScore(row, 1, totalHoles);
@@ -816,10 +865,18 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     const score = getRowScore(row, hole);
     const displayScore = score || '';
     const matchPlayOutcome = isMatchPlay ? getMatchPlayOutcome(row.primaryPlayerId, hole) : null;
+    const strokesGiven = getRowStrokesGiven(row, hole);
+    const netScore = score === null ? null : score - strokesGiven;
+    const showNetScore = !isMatchPlay && score !== null && strokesGiven > 0;
+    const markedScore = showNetScore ? netScore : score;
 
     let className = 'score-cell';
     if (score === null) {
       className += ' empty';
+    }
+
+    if (showNetScore) {
+      className += ' has-net-stack';
     }
 
     if (isMatchPlay) {
@@ -827,14 +884,14 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
       if (matchPlayOutcome) {
         className += ` hole-${matchPlayOutcome}`;
       }
-    } else if (score !== null) {
-      if (score <= par - 2) {
+    } else if (markedScore !== null) {
+      if (markedScore <= par - 2) {
         className += ' eagle';
-      } else if (score === par - 1) {
+      } else if (markedScore === par - 1) {
         className += ' birdie';
-      } else if (score === par) {
+      } else if (markedScore === par) {
         className += ' par';
-      } else if (score === par + 1) {
+      } else if (markedScore === par + 1) {
         className += ' bogey';
       } else {
         className += ' double-bogey';
@@ -850,12 +907,8 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
             ? ', hole halved'
             : '';
 
-    const teamStrokesGiven =
-      scrambleSideStrokes && row.sideIndex !== undefined
-        ? getSideStrokesGiven(row.sideIndex, hole)
-        : 0;
-    const strokesGiven = isSinglesHeadToHead ? getStrokesGiven(row.primaryPlayerId, hole) : teamStrokesGiven;
     const strokesLabel = strokesGiven > 0 ? `, ${strokesGiven} stroke${strokesGiven > 1 ? 's' : ''} given` : '';
+    const netLabel = showNetScore && netScore !== null ? `, net ${netScore}` : '';
 
     return (
       <td className={className}>
@@ -870,9 +923,16 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
           type="button"
           className="score-entry-btn"
           onClick={() => openScoreDialog(row.playerIds, row.label, hole, par)}
-          aria-label={`${row.label}, hole ${hole}, ${score ?? 'no score'}, par ${par}${outcomeLabel}${strokesLabel}`}
+          aria-label={`${row.label}, hole ${hole}, ${score ?? 'no score'}, par ${par}${outcomeLabel}${strokesLabel}${netLabel}`}
         >
-          <span className="score-text">{displayScore}</span>
+          {showNetScore && netScore !== null ? (
+            <span className="score-net-wrapper">
+              <span className="score-text net">{netScore}</span>
+              <span className="score-text gross is-net-adjusted">{score}</span>
+            </span>
+          ) : (
+            <span className="score-text">{displayScore}</span>
+          )}
         </button>
       </td>
     );
@@ -937,7 +997,9 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
                       {' '}= {detail.weightedHigh.toFixed(2)}
                     </span>
                     <span>Raw team handicap: {detail.rawTeamHandicap.toFixed(2)}</span>
-                    <span>Prorated for {totalHoles} holes: {detail.proratedTeamHandicap.toFixed(2)}</span>
+                    {matchup.handicapRule?.prorateByHoles !== false && (
+                      <span>Prorated for {totalHoles} holes: {detail.effectiveTeamHandicap.toFixed(2)}</span>
+                    )}
                     <span>Rounded team handicap: {scrambleSideStrokes.sideHandicaps[sideIndex]}</span>
                   </div>
                 );
@@ -1076,6 +1138,11 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
                     )}
                   </div>
                 </td>
+                {(() => {
+                  const showNetTotals = rowHasAnyScoredHandicapHole(row);
+
+                  return (
+                    <>
                 {holeGroups.map((group) => (
                   <React.Fragment key={`player-${row.id}-${group.label}`}>
                     {group.holes.map((hole) => (
@@ -1084,13 +1151,34 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
                       </React.Fragment>
                     ))}
                     <td className="total-cell">
-                      <span className="score-text">{getRowSegmentScore(row, group.start, group.end) || ''}</span>
+                      {showNetTotals ? (
+                        <span className="score-total-stack">
+                          <span className="score-text gross is-net-adjusted">{getRowSegmentScore(row, group.start, group.end) || ''}</span>
+                          <span className="score-text net">{getRowSegmentNetScore(row, group.start, group.end) || ''}</span>
+                        </span>
+                      ) : (
+                        <span className="score-text">{getRowSegmentScore(row, group.start, group.end) || ''}</span>
+                      )}
                     </td>
                   </React.Fragment>
                 ))}
-                <td className="total-cell bold"><span className="score-text">{getRowTotalScore(row) || ''}</span></td>
+                <td className="total-cell bold">
+                  {showNetTotals ? (
+                    <span className="score-total-stack">
+                      <span className="score-text gross is-net-adjusted">{getRowTotalScore(row) || ''}</span>
+                      <span className="score-text net">{getRowSegmentNetScore(row, 1, totalHoles) || ''}</span>
+                    </span>
+                  ) : (
+                    <span className="score-text">{getRowTotalScore(row) || ''}</span>
+                  )}
+                </td>
+                    </>
+                  );
+                })()}
               </tr>
-              {((useSharedTeamRows && rowIndex === 0) || (!useSharedTeamRows && matchupSides?.splitAfterId === row.primaryPlayerId)) &&
+              {isMatchPlay &&
+                (((useSharedTeamRows && rowIndex === 0) ||
+                  (!useSharedTeamRows && matchupSides?.splitAfterId === row.primaryPlayerId))) &&
                 renderMatchScoreRow()}
               </React.Fragment>
             ))}

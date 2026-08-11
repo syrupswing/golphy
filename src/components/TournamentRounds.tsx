@@ -441,12 +441,15 @@ export default function TournamentSessionsEditor({
           )}
 
           {session.matchups.map((matchup, matchupIndex) => {
+            const sessionFormat = getSessionFormatDefinition(session.format, sessionFormats);
+            const usesNetTotals =
+              sessionFormat.resultMode === 'net-total' || sessionFormat.baseFormat === 'stroke';
             const result = resolveMatchup(matchup, session.format, sessionFormats, { playerProfiles });
             const handicapAllowances = result.handicapAllowances ?? [0, 0];
             const sideHandicaps = result.sideHandicaps ?? [null, null];
             const hasHandicapRule =
-              getSessionFormatDefinition(session.format, sessionFormats).useHandicaps &&
-              Boolean(getSessionFormatDefinition(session.format, sessionFormats).handicapRule);
+              sessionFormat.useHandicaps &&
+              Boolean(sessionFormat.handicapRule);
             const allowanceSummary =
               handicapAllowances[0] > 0
                 ? `${getEntryName(matchup.sides[0].entryId, 'Side A')} receives ${handicapAllowances[0]} stroke${handicapAllowances[0] === 1 ? '' : 's'}`
@@ -553,7 +556,7 @@ export default function TournamentSessionsEditor({
                   {result.holesPlayed === 0
                     ? 'No scores yet'
                     : result.isTie
-                      ? `Halved · ${POINTS_FOR_TIE} point each · ${result.summary}`
+                      ? `${usesNetTotals ? 'Tied' : 'Halved'} · ${POINTS_FOR_TIE} point each · ${result.summary}`
                       : `${getEntryName(matchup.sides[result.winningSideIndex ?? 0].entryId, 'Leading side')} +${POINTS_FOR_WIN} · ${result.summary}`}
                   {result.holesPlayed > 0 && !result.isComplete && ' (in progress)'}
                 </p>
