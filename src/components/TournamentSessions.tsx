@@ -345,7 +345,7 @@ export default function TournamentSessions({
                   {matchup.sides.map((side, sideIndex) => (
                     <div
                       key={sideIndex}
-                      className={`session-match-side${result.winningSideIndex === sideIndex ? ' is-winner' : ''}`}
+                      className={`session-match-side${result.winningSideIndexes.includes(sideIndex) && !result.isTie ? ' is-winner' : ''}`}
                     >
                       <span className="session-match-team">{getEntryName(side.entryId)}</span>
                       <span className="session-match-players">

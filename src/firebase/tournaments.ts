@@ -224,7 +224,8 @@ const sanitizeSessions = (sessions: TournamentSession[]): TournamentSession[] =>
         roundId: matchup.roundId ?? '',
         name: matchup.name?.trim() ?? '',
         scorecardName: matchup.scorecardName ?? '',
-        sides: matchup.sides.slice(0, 2).map((side) => ({
+        // Stroke play fields can hold more than two sides.
+        sides: matchup.sides.map((side) => ({
           entryId: side.entryId ?? '',
           playerIds: side.playerIds.filter(Boolean),
           scores: Array.from({ length: holes }, (_, hole) => {

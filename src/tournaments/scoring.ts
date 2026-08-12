@@ -290,14 +290,16 @@ const isStrokeFormat = (baseFormat: BuiltInTournamentMatchupFormat): boolean => 
 export interface MatchupResult {
   isComplete: boolean;
   holesPlayed: number;
-  holesWon: [number, number];
-  totals: [number, number];
+  holesWon: number[];
+  totals: number[];
   winningSideIndex: number | null;
   isTie: boolean;
   summary: string;
-  netTotals?: [number, number];
-  handicapAllowances?: [number, number];
-  sideHandicaps?: [number | null, number | null];
+  // Every side sharing the leading score, so a tied stroke play field can be marked.
+  winningSideIndexes: number[];
+  netTotals?: number[];
+  handicapAllowances?: number[];
+  sideHandicaps?: (number | null)[];
 }
 
 interface MatchupResolutionContext {
@@ -361,33 +363,26 @@ const calculateHandicapAllowances = (
   matchup: TournamentMatchup,
   format: TournamentSessionFormat,
   context: MatchupResolutionContext
-): { allowances: [number, number]; sideHandicaps: [number | null, number | null] } => {
-  if (context.scoresAreNet || !format.useHandicaps || !format.handicapRule) {
-    return { allowances: [0, 0], sideHandicaps: [null, null] };
+): { allowances: number[]; sideHandicaps: (number | null)[] } => {
+  const rule = format.handicapRule;
+  const noAllowances = matchup.sides.map(() => 0);
+
+  if (context.scoresAreNet || !format.useHandicaps || !rule) {
+    return { allowances: noAllowances, sideHandicaps: matchup.sides.map(() => null) };
   }
 
-  const [sideA, sideB] = matchup.sides;
-  const handicapA = calculateSideHandicap(sideA, format.handicapRule, context);
-  const handicapB = calculateSideHandicap(sideB, format.handicapRule, context);
+  const sideHandicaps = matchup.sides.map((side) => calculateSideHandicap(side, rule, context));
+  const resolved = sideHandicaps.filter((value): value is number => value !== null);
 
-  if (handicapA === null || handicapB === null) {
-    return { allowances: [0, 0], sideHandicaps: [handicapA, handicapB] };
+  if (resolved.length !== sideHandicaps.length || resolved.length < 2) {
+    return { allowances: noAllowances, sideHandicaps };
   }
 
-  if (handicapA === handicapB) {
-    return { allowances: [0, 0], sideHandicaps: [handicapA, handicapB] };
-  }
-
-  if (handicapA > handicapB) {
-    return {
-      allowances: [handicapA - handicapB, 0],
-      sideHandicaps: [handicapA, handicapB],
-    };
-  }
-
+  // Strokes are played off the lowest handicap in the match.
+  const lowest = Math.min(...resolved);
   return {
-    allowances: [0, handicapB - handicapA],
-    sideHandicaps: [handicapA, handicapB],
+    allowances: resolved.map((value) => value - lowest),
+    sideHandicaps,
   };
 };
 
@@ -398,50 +393,45 @@ export const resolveMatchup = (
   context: MatchupResolutionContext = {}
 ): MatchupResult => {
   const format = getSessionFormatDefinition(formatId, customFormats);
-  const [sideA, sideB] = matchup.sides;
+  const sides = matchup.sides;
   const holesInMatch = normalizeSessionHoleCount(context.holesInMatch);
   const handicapMeta = calculateHandicapAllowances(matchup, format, context);
   const useHandicapByHole = format.resultMode === 'holes';
-  const remainingAllowances: [number, number] = [
-    handicapMeta.allowances[0],
-    handicapMeta.allowances[1],
-  ];
-  const holesWon: [number, number] = [0, 0];
-  const totals: [number, number] = [0, 0];
+  const remainingAllowances = [...handicapMeta.allowances];
+  const holesWon = sides.map(() => 0);
+  const totals = sides.map(() => 0);
   let holesPlayed = 0;
 
   for (let hole = 0; hole < holesInMatch; hole += 1) {
-    const scoreA = getHoleScore(sideA, hole);
-    const scoreB = getHoleScore(sideB, hole);
+    const holeScores = sides.map((side) => getHoleScore(side, hole));
 
-    if (!scoreA || !scoreB) {
+    // A hole only counts once every side in the match has posted a score.
+    if (!holeScores.length || holeScores.some((score) => !score)) {
       continue;
     }
 
     holesPlayed += 1;
-    totals[0] += scoreA;
-    totals[1] += scoreB;
+    holeScores.forEach((score, sideIndex) => {
+      totals[sideIndex] += score;
+    });
 
-    const adjustedA = useHandicapByHole && remainingAllowances[0] > 0 ? scoreA - 1 : scoreA;
-    const adjustedB = useHandicapByHole && remainingAllowances[1] > 0 ? scoreB - 1 : scoreB;
+    const adjusted = holeScores.map((score, sideIndex) => {
+      if (!useHandicapByHole || remainingAllowances[sideIndex] <= 0) {
+        return score;
+      }
 
-    if (useHandicapByHole && remainingAllowances[0] > 0) {
-      remainingAllowances[0] -= 1;
+      remainingAllowances[sideIndex] -= 1;
+      return score - 1;
+    });
+
+    const bestHoleScore = Math.min(...adjusted);
+    if (adjusted.filter((score) => score === bestHoleScore).length === 1) {
+      holesWon[adjusted.indexOf(bestHoleScore)] += 1;
     }
-
-    if (useHandicapByHole && remainingAllowances[1] > 0) {
-      remainingAllowances[1] -= 1;
-    }
-
-    if (adjustedA < adjustedB) holesWon[0] += 1;
-    else if (adjustedB < adjustedA) holesWon[1] += 1;
   }
 
   const isComplete = holesPlayed === holesInMatch;
-  const netTotals: [number, number] = [
-    totals[0] - handicapMeta.allowances[0],
-    totals[1] - handicapMeta.allowances[1],
-  ];
+  const netTotals = totals.map((total, sideIndex) => total - handicapMeta.allowances[sideIndex]);
 
   if (holesPlayed === 0) {
     return {
@@ -452,6 +442,7 @@ export const resolveMatchup = (
       winningSideIndex: null,
       isTie: false,
       summary: 'No scores yet',
+      winningSideIndexes: [],
       netTotals,
       handicapAllowances: handicapMeta.allowances,
       sideHandicaps: handicapMeta.sideHandicaps,
@@ -460,28 +451,38 @@ export const resolveMatchup = (
 
   const useNetTotals = format.resultMode === 'net-total' || isStrokeFormat(format.baseFormat);
 
-  const [metricA, metricB] = useNetTotals
-    ? [netTotals[1], netTotals[0]] // Lower net total wins, so invert for a shared comparison.
-    : [holesWon[0], holesWon[1]];
+  // Lower net total wins, so invert it for a shared "higher is better" comparison.
+  const metrics = useNetTotals ? netTotals.map((total) => -total) : holesWon;
+  const bestMetric = Math.max(...metrics);
+  const winningSideIndexes = metrics.reduce<number[]>((leaders, metric, sideIndex) => {
+    if (metric === bestMetric) leaders.push(sideIndex);
+    return leaders;
+  }, []);
 
-  const isTie = metricA === metricB;
-  const winningSideIndex = isTie ? null : metricA > metricB ? 0 : 1;
+  const isTie = winningSideIndexes.length !== 1;
+  const winningSideIndex = isTie ? null : winningSideIndexes[0];
 
-  const holeLead = Math.abs(holesWon[0] - holesWon[1]);
+  const holeLead = sides.length === 2 ? Math.abs(holesWon[0] - holesWon[1]) : 0;
   const holesRemaining = holesInMatch - holesPlayed;
+  const hasAllowances = handicapMeta.allowances.some((allowance) => allowance > 0);
 
-  const matchPlaySummary = isTie
-    ? `All square thru ${holesPlayed}`
-    : holeLead > holesRemaining && holesRemaining > 0
-      ? `Wins ${holeLead - holesRemaining} & ${holesRemaining}`
-      : isComplete
-        ? `Wins ${holeLead} up`
-        : `${holeLead} up thru ${holesPlayed}`;
+  const matchPlaySummary =
+    sides.length !== 2
+      ? holesWon.join(' v ')
+      : isTie
+        ? `All square thru ${holesPlayed}`
+        : holeLead > holesRemaining && holesRemaining > 0
+          ? `Wins ${holeLead - holesRemaining} & ${holesRemaining}`
+          : isComplete
+            ? `Wins ${holeLead} up`
+            : `${holeLead} up thru ${holesPlayed}`;
 
   const summary = useNetTotals
-    ? handicapMeta.allowances[0] || handicapMeta.allowances[1]
-      ? `${totals[0]} (${netTotals[0]}) v ${totals[1]} (${netTotals[1]})`
-      : `${totals[0]} v ${totals[1]}`
+    ? totals
+        .map((total, sideIndex) =>
+          hasAllowances ? `${total} (${netTotals[sideIndex]})` : `${total}`
+        )
+        .join(' v ')
     : matchPlaySummary;
 
   return {
@@ -492,6 +493,7 @@ export const resolveMatchup = (
     winningSideIndex,
     isTie,
     summary,
+    winningSideIndexes,
     netTotals,
     handicapAllowances: handicapMeta.allowances,
     sideHandicaps: handicapMeta.sideHandicaps,
@@ -560,9 +562,9 @@ export const buildSideScoresFromRound = (
 };
 
 export interface MatchRoundScores {
-  sideScores: [number[], number[]];
-  sideHandicaps: [number | null, number | null];
-  allowances: [number, number];
+  sideScores: number[][];
+  sideHandicaps: (number | null)[];
+  allowances: number[];
 }
 
 const resolveSideHandicap = (
@@ -609,40 +611,35 @@ export const buildMatchRoundScores = (
   handicapOf: (playerId: string) => number | null
 ): MatchRoundScores => {
   const holeCount = normalizeSessionHoleCount(holes);
-  const grossScores: [number[], number[]] = [
-    buildSideScoresFromRound(matchup.sides[0]?.playerIds ?? [], roundScores, holeCount),
-    buildSideScoresFromRound(matchup.sides[1]?.playerIds ?? [], roundScores, holeCount),
-  ];
+  const sides = matchup.sides;
+  const grossScores = sides.map((side) =>
+    buildSideScoresFromRound(side?.playerIds ?? [], roundScores, holeCount)
+  );
 
-  const sideHandicaps: [number | null, number | null] = format.useHandicaps
-    ? [
-        resolveSideHandicap(matchup.sides[0]?.playerIds ?? [], format, handicapOf, holeCount),
-        resolveSideHandicap(matchup.sides[1]?.playerIds ?? [], format, handicapOf, holeCount),
-      ]
-    : [null, null];
+  const sideHandicaps: (number | null)[] = format.useHandicaps
+    ? sides.map((side) => resolveSideHandicap(side?.playerIds ?? [], format, handicapOf, holeCount))
+    : sides.map(() => null);
 
-  const allowances: [number, number] = [0, 0];
+  const allowances = sides.map(() => 0);
+  const resolvedHandicaps = sideHandicaps.filter((value): value is number => value !== null);
 
-  if (sideHandicaps[0] !== null && sideHandicaps[1] !== null) {
-    const difference = sideHandicaps[0] - sideHandicaps[1];
-    if (difference > 0) {
-      allowances[0] = difference;
-    } else if (difference < 0) {
-      allowances[1] = -difference;
-    }
+  if (resolvedHandicaps.length === sides.length && sides.length > 1) {
+    const lowest = Math.min(...resolvedHandicaps);
+    resolvedHandicaps.forEach((handicap, sideIndex) => {
+      allowances[sideIndex] = handicap - lowest;
+    });
   }
 
-  const byHole: [Record<number, number>, Record<number, number>] = [
-    allocateStrokesByStrokeIndex(allowances[0], holeDetails, holeCount),
-    allocateStrokesByStrokeIndex(allowances[1], holeDetails, holeCount),
-  ];
+  const byHole = allowances.map((allowance) =>
+    allocateStrokesByStrokeIndex(allowance, holeDetails, holeCount)
+  );
 
   return {
-    sideScores: [0, 1].map((sideIndex) =>
-      grossScores[sideIndex].map((gross, holeIndex) =>
+    sideScores: grossScores.map((scores, sideIndex) =>
+      scores.map((gross, holeIndex) =>
         gross > 0 ? gross - (byHole[sideIndex][holeIndex + 1] ?? 0) : 0
       )
-    ) as [number[], number[]],
+    ),
     sideHandicaps,
     allowances,
   };
@@ -706,11 +703,9 @@ export const calculateStandings = (
         if (!side.entryId) return;
 
         const row = rowFor(side.entryId);
-        const earned = result.isTie
-          ? POINTS_FOR_TIE
-          : result.winningSideIndex === index
-            ? POINTS_FOR_WIN
-            : 0;
+        // A stroke play field can have several sides sharing the leading score.
+        const isLeader = result.winningSideIndexes.includes(index);
+        const earned = isLeader ? (result.isTie ? POINTS_FOR_TIE : POINTS_FOR_WIN) : 0;
 
         row.matchesPlayed += 1;
         row.projectedPoints += earned;
@@ -722,8 +717,8 @@ export const calculateStandings = (
         row.confirmedMatches += 1;
         row.points += earned;
 
-        if (result.isTie) row.ties += 1;
-        else if (result.winningSideIndex === index) row.wins += 1;
+        if (isLeader && result.isTie) row.ties += 1;
+        else if (isLeader) row.wins += 1;
         else row.losses += 1;
       });
     });

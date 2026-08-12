@@ -46,12 +46,15 @@ export default function TournamentMatchBuilder({
   const [setIndexes, setSetIndexes] = useState<number[]>([]);
   const [sideEntryIds, setSideEntryIds] = useState<[string, string]>(['', '']);
   const [sidePlayerIds, setSidePlayerIds] = useState<[string[], string[]]>([[], []]);
+  const [fieldPlayers, setFieldPlayers] = useState<Array<{ entryId: string; playerId: string }>>([]);
   const [error, setError] = useState('');
 
   const requiredSets = Math.max(1, Math.round(session.holes / 9));
   const playersPerSide = Math.max(1, formatDefinition.playersPerSide);
   const enforcesTiers = formatDefinition.lineupRule === 'same-tier-only';
   const scorecard = scorecards.find((item) => item.id === scorecardId) ?? null;
+  // Stroke play is a field, so any number of players from any teams can share one card.
+  const isStrokeField = formatDefinition.baseFormat === 'stroke' && !formatDefinition.hasTeams;
 
   const getEntry = (entryId: string) => entries.find((entry) => entry.id === entryId) ?? null;
 
@@ -139,6 +142,15 @@ export default function TournamentMatchBuilder({
     });
   };
 
+  const toggleFieldPlayer = (entryId: string, playerId: string) => {
+    setError('');
+    setFieldPlayers((prev) =>
+      prev.some((item) => item.playerId === playerId)
+        ? prev.filter((item) => item.playerId !== playerId)
+        : [...prev, { entryId, playerId }]
+    );
+  };
+
   const handleCreate = () => {
     if (!scorecard) {
       setError('Choose a course for this match.');
@@ -149,6 +161,25 @@ export default function TournamentMatchBuilder({
       setError(
         `Choose ${requiredSets} set${requiredSets === 1 ? '' : 's'} of nine to match the ${session.holes}-hole session.`
       );
+      return;
+    }
+
+    if (isStrokeField) {
+      if (fieldPlayers.length < 2) {
+        setError('Pick at least two players for a stroke play match.');
+        return;
+      }
+
+      onCreate({
+        name: name.trim(),
+        scorecard,
+        setIndexes,
+        sides: fieldPlayers.map((item) => ({
+          entryId: item.entryId,
+          playerIds: [item.playerId],
+          scores: Array.from({ length: session.holes }, () => 0),
+        })),
+      });
       return;
     }
 
@@ -245,55 +276,90 @@ export default function TournamentMatchBuilder({
         </div>
       )}
 
-      {([0, 1] as const).map((sideIndex) => {
-        const entryId = sideEntryIds[sideIndex];
-        const entry = getEntry(entryId);
-
-        return (
-          <div key={sideIndex} className="session-side">
-            <label className="session-field">
-              <span>{formatDefinition.hasTeams ? `Side ${sideIndex + 1} team` : `Player ${sideIndex + 1}`}</span>
-              <select
-                value={entryId}
-                onChange={(event) => changeSideEntry(sideIndex, event.target.value)}
-                disabled={isSaving}
-              >
-                <option value="">{formatDefinition.hasTeams ? 'Pick a team' : 'Pick a player'}</option>
-                {entries.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {getEntryLabel(option)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {entry && (
-              <div className="session-chip-row">
-                {entry.playerIds.map((playerId) => {
-                  const isSelected = sidePlayerIds[sideIndex].includes(playerId);
-                  const tier = entry.playerTiers?.[playerId];
-
-                  return (
-                    <button
-                      key={playerId}
-                      type="button"
-                      className={`session-chip${isSelected ? ' is-selected' : ''}`}
-                      onClick={() => togglePlayer(sideIndex, playerId)}
-                      disabled={isSaving}
-                    >
-                      {getPlayerDisplayName(playerId, playerProfiles)}
-                      {tier && <span className="session-chip-badge">{tier}</span>}
-                    </button>
-                  );
-                })}
-                <span className="session-chip-count">
-                  {sidePlayerIds[sideIndex].length}/{playersPerSide}
-                </span>
-              </div>
+      {isStrokeField ? (
+        <div className="session-side">
+          <div className="session-field">
+            <span>Players in this match ({fieldPlayers.length} selected)</span>
+            {entries.length === 0 && (
+              <p className="session-empty">Add players to the tournament first.</p>
             )}
+            {entries.map((entry) => (
+              <div key={entry.id} className="session-field">
+                <span>{getEntryLabel(entry)}</span>
+                <div className="session-chip-row">
+                  {entry.playerIds.map((playerId) => {
+                    const isSelected = fieldPlayers.some((item) => item.playerId === playerId);
+
+                    return (
+                      <button
+                        key={playerId}
+                        type="button"
+                        className={`session-chip${isSelected ? ' is-selected' : ''}`}
+                        onClick={() => toggleFieldPlayer(entry.id, playerId)}
+                        disabled={isSaving}
+                      >
+                        {getPlayerDisplayName(playerId, playerProfiles)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
-        );
-      })}
+        </div>
+      ) : (
+        ([0, 1] as const).map((sideIndex) => {
+          const entryId = sideEntryIds[sideIndex];
+          const entry = getEntry(entryId);
+
+          return (
+            <div key={sideIndex} className="session-side">
+              <label className="session-field">
+                <span>
+                  {formatDefinition.hasTeams ? `Side ${sideIndex + 1} team` : `Player ${sideIndex + 1}`}
+                </span>
+                <select
+                  value={entryId}
+                  onChange={(event) => changeSideEntry(sideIndex, event.target.value)}
+                  disabled={isSaving}
+                >
+                  <option value="">{formatDefinition.hasTeams ? 'Pick a team' : 'Pick a player'}</option>
+                  {entries.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {getEntryLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {entry && (
+                <div className="session-chip-row">
+                  {entry.playerIds.map((playerId) => {
+                    const isSelected = sidePlayerIds[sideIndex].includes(playerId);
+                    const tier = entry.playerTiers?.[playerId];
+
+                    return (
+                      <button
+                        key={playerId}
+                        type="button"
+                        className={`session-chip${isSelected ? ' is-selected' : ''}`}
+                        onClick={() => togglePlayer(sideIndex, playerId)}
+                        disabled={isSaving}
+                      >
+                        {getPlayerDisplayName(playerId, playerProfiles)}
+                        {tier && <span className="session-chip-badge">{tier}</span>}
+                      </button>
+                    );
+                  })}
+                  <span className="session-chip-count">
+                    {sidePlayerIds[sideIndex].length}/{playersPerSide}
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
 
       {error && <p className="session-error">{error}</p>}
 
