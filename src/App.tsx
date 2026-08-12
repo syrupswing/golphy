@@ -28,6 +28,7 @@ import {
 import { isFirebaseConfigured } from './firebase/config'
 import {
   createRound,
+  deleteRound,
   loadRound,
   normalizeRoundId,
   listRounds,
@@ -39,7 +40,9 @@ import { createPlayer, deletePlayer, listPlayers, updatePlayer } from './firebas
 import {
   createTournament,
   deleteTournament,
+  getTournament,
   listTournaments,
+  saveTournamentSessions,
   updateTournament,
 } from './firebase/tournaments'
 import {
@@ -48,7 +51,7 @@ import {
 } from './firebase/formats'
 import type { TournamentInput } from './firebase/tournaments'
 import './styles/App.scss'
-import golphyBanner from './assets/Golphy-banner.svg'
+import golphyBanner from './assets/golphy-by-banner.svg'
 
 const PLAYER_COLORS = [
   '#e74c3c', '#3498db', '#2ecc71', '#f39c12', 
@@ -1433,6 +1436,43 @@ function App() {
     setShowRoundInfoPopover(false);
   };
 
+  const deleteTournamentMatch = async () => {
+    if (!activeRoundTournamentId || !sharedRoundId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Delete this match? The round and its scores are removed from the tournament.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const tournamentId = activeRoundTournamentId;
+    const roundId = sharedRoundId;
+
+    try {
+      const tournament = await getTournament(tournamentId);
+
+      if (tournament) {
+        const nextSessions = (tournament.sessions ?? tournament.rounds ?? []).map((session) => ({
+          ...session,
+          matchups: session.matchups.filter((matchup) => matchup.roundId !== roundId),
+        }));
+
+        await saveTournamentSessions(tournamentId, nextSessions, clientId);
+      }
+
+      await deleteRound(roundId);
+      setShowRoundInfoPopover(false);
+      endRound();
+      openTournamentDashboard(tournamentId);
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : 'Could not delete the match.');
+    }
+  };
+
   const createSharedRound = async () => {
     if (!isFirebaseConfigured) {
       setSyncError('Firebase is not configured. Add VITE_FIREBASE_* values in .env.local first.');
@@ -1762,8 +1802,7 @@ function App() {
             <div className="resume-panel">
               <div className="resume-info">
                 <strong>{activeTournament?.name || 'Tournament editor'}</strong>
-                <span>Edit tournament details, sessions, and matches.</span>
-              </div>
+                <span>Edit tournament details and player assignments.</span>              </div>
               <div className="resume-actions">
                 <button onClick={() => setTournamentViewMode('dashboard')} className="resume-btn">
                   Back to dashboard
@@ -1776,10 +1815,8 @@ function App() {
               tournaments={tournaments}
               initialTournamentId={activeTournamentId}
               onCancel={() => setTournamentViewMode('dashboard')}
-              sessionFormats={globalSessionFormats}
               playerProfiles={playerProfiles}
               isSaving={isSavingTournament}
-              clientId={clientId}
               onCreate={handleCreateTournament}
               onUpdate={handleUpdateTournament}
               onDelete={handleDeleteTournament}
@@ -1793,9 +1830,13 @@ function App() {
             initialTournament={activeTournament}
             sessionFormats={globalSessionFormats}
             playerProfiles={playerProfiles}
+            scorecards={scorecards}
             clientId={clientId}
             onManage={() => {
               setTournamentViewMode('manage');
+            }}
+            onOpenRound={(roundId) => {
+              void openSharedRound(roundId, activeTournamentId);
             }}
           />
         )}
@@ -2190,10 +2231,8 @@ function App() {
                     <TournamentManager
                       mode={tournamentPanelMode}
                       tournaments={tournaments}
-                      sessionFormats={globalSessionFormats}
                       playerProfiles={playerProfiles}
                       isSaving={isSavingTournament}
-                      clientId={clientId}
                       onCreate={handleCreateTournament}
                       onUpdate={handleUpdateTournament}
                       onDelete={handleDeleteTournament}
@@ -2837,6 +2876,15 @@ function App() {
                   </>
                 )}
               </div>
+              {activeRoundTournamentId && sharedRoundId && (
+                <button
+                  type="button"
+                  className="round-match-delete-btn"
+                  onClick={() => void deleteTournamentMatch()}
+                >
+                  Delete match
+                </button>
+              )}
               {syncError && <span className="sync-error">Sync issue: {syncError}</span>}
             </div>
           )}

@@ -1049,6 +1049,23 @@
     font-weight: 600;
   }
 
+  .round-match-delete-btn {
+    margin-top: $spacing-xs;
+    padding: $spacing-xs $spacing-sm;
+    border-radius: $border-radius-sm;
+    background: transparent;
+    border: 1px solid color.adjust($danger-color, $lightness: 24%);
+    color: $danger-color;
+    font-size: $font-sm;
+    font-weight: 600;
+
+    &:hover {
+      background: $danger-color;
+      border-color: $danger-color;
+      color: $white;
+    }
+  }
+
   .round-player-management {
     margin-top: $spacing-xs;
     padding-top: $spacing-xs;

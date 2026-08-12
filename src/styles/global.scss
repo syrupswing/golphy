@@ -1,20 +1,10 @@
 @use './variables' as *;
 
 * {
-  margin: 0;
-  padding: 0;
   box-sizing: border-box;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: $light-color;
-  color: $dark-color;
-  line-height: 1.6;
   min-height: 100vh;
   overflow-x: hidden;
 }
@@ -25,11 +15,13 @@ body {
   flex-direction: column;
 }
 
-button {
+// Bare buttons in the app's own components stay unstyled; .btn opts into Bootstrap.
+button:not([class*='btn']) {
   cursor: pointer;
   font-family: inherit;
   border: none;
   outline: none;
+  background: none;
   transition: all 0.2s ease;
 
   &:active {
@@ -37,11 +29,11 @@ button {
   }
 }
 
-input {
+input:not([class*='form-']) {
   font-family: inherit;
   border: 1px solid $gray;
   outline: none;
-  
+
   &:focus {
     border-color: $primary-color;
   }

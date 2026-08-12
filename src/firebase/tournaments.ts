@@ -24,9 +24,9 @@ import type {
 } from '../types/index.ts';
 import {
   DEFAULT_TOURNAMENT_SESSION_FORMATS,
-  HOLES_PER_MATCH,
   getTournamentSessionFormats,
   normalizeSessionFormat,
+  normalizeSessionHoleCount,
 } from '../tournaments/scoring';
 import { db, isFirebaseConfigured } from './config';
 
@@ -152,10 +152,13 @@ const parseSessions = (source: unknown[] = []): TournamentSession[] =>
           ? (rawFormat as TournamentMatchupFormat)
           : 'singles';
 
+      const holes = normalizeSessionHoleCount(session.holes);
+
       return {
         id: typeof session.id === 'string' ? session.id : createEntryId(),
         name: typeof session.name === 'string' ? session.name : 'Session',
         format,
+        holes,
         matchups: rawMatchups
           .filter((candidate): candidate is Record<string, unknown> =>
             typeof candidate === 'object' && candidate !== null
@@ -163,6 +166,10 @@ const parseSessions = (source: unknown[] = []): TournamentSession[] =>
           .map((matchup) => ({
             id: typeof matchup.id === 'string' ? matchup.id : createEntryId(),
             confirmed: matchup.confirmed === true,
+            roundId: typeof matchup.roundId === 'string' ? matchup.roundId : undefined,
+            name: typeof matchup.name === 'string' ? matchup.name : undefined,
+            scorecardName:
+              typeof matchup.scorecardName === 'string' ? matchup.scorecardName : undefined,
             sides: (Array.isArray(matchup.sides) ? matchup.sides : [])
               .filter((candidate): candidate is Record<string, unknown> =>
                 typeof candidate === 'object' && candidate !== null
@@ -203,23 +210,31 @@ const parseDoc = (id: string, data: TournamentDocument): Tournament => {
 };
 
 const sanitizeSessions = (sessions: TournamentSession[]): TournamentSession[] =>
-  sessions.map((session) => ({
-    id: session.id || createEntryId(),
-    name: session.name.trim(),
-    format: (session.format || 'singles') as TournamentMatchupFormat,
-    matchups: session.matchups.map((matchup) => ({
-      id: matchup.id || createEntryId(),
-      confirmed: matchup.confirmed === true,
-      sides: matchup.sides.slice(0, 2).map((side) => ({
-        entryId: side.entryId ?? '',
-        playerIds: side.playerIds.filter(Boolean),
-        scores: Array.from({ length: HOLES_PER_MATCH }, (_, hole) => {
-          const value = side.scores?.[hole];
-          return Number.isFinite(value) && value > 0 ? value : 0;
-        }),
+  sessions.map((session) => {
+    const holes = normalizeSessionHoleCount(session.holes);
+
+    return {
+      id: session.id || createEntryId(),
+      name: session.name.trim(),
+      format: (session.format || 'singles') as TournamentMatchupFormat,
+      holes,
+      matchups: session.matchups.map((matchup) => ({
+        id: matchup.id || createEntryId(),
+        confirmed: matchup.confirmed === true,
+        roundId: matchup.roundId ?? '',
+        name: matchup.name?.trim() ?? '',
+        scorecardName: matchup.scorecardName ?? '',
+        sides: matchup.sides.slice(0, 2).map((side) => ({
+          entryId: side.entryId ?? '',
+          playerIds: side.playerIds.filter(Boolean),
+          scores: Array.from({ length: holes }, (_, hole) => {
+            const value = side.scores?.[hole];
+            return Number.isFinite(value) && value > 0 ? value : 0;
+          }),
+        })),
       })),
-    })),
-  }));
+    };
+  });
 
 const sanitizeEntries = (entries: TournamentEntry[], format: TournamentFormat): TournamentEntry[] =>
   entries

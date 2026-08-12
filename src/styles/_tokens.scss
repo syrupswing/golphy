@@ -1,0 +1,71 @@
+// ---------------------------------------------------------------------------
+// Golphy design tokens
+//
+// Single source of truth for palette, typography and shape. Bootstrap's theme
+// and the app's own SCSS both read from this file, so changing a value here
+// restyles the whole app. This is the file to edit for personal preference.
+// ---------------------------------------------------------------------------
+
+// --- Palette ---------------------------------------------------------------
+$brand-primary: #107d57; // deep green
+$brand-secondary: #2f73b2; // blue
+$brand-accent: #4df761; // bright green, for highlights and positive emphasis
+$brand-info: #8eafed; // light blue
+$brand-tertiary: #725567; // plum
+
+$brand-success: $brand-primary;
+
+// Functional colors outside the brand palette; destructive and cautionary
+// states need to stay unmistakable.
+$brand-danger: #b0453c;
+$brand-warning: #c98a2e;
+
+// Neutrals, tinted toward the plum so greys sit with the palette.
+$brand-ink: #2b2128; // headings and body copy
+$brand-muted: #7c6e76; // secondary copy and meta text
+$brand-surface: #ffffff; // cards and raised panels
+$brand-canvas: #f5f2f4; // page background
+$brand-line: #e4dde1; // borders and dividers
+
+// --- Typography ------------------------------------------------------------
+$font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua',
+  Georgia, 'Times New Roman', serif;
+$font-sans: 'Kanit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+  'Helvetica Neue', Arial, sans-serif;
+
+// Handwritten accent, used for scores and player names on the scorecard.
+$font-script: 'Nanum Brush Script', cursive;
+
+// Swap to $font-serif for a serif app.
+$font-base: $font-sans;
+$font-headings: $font-sans;
+
+$font-xs: 0.75rem;
+$font-sm: 0.875rem;
+$font-md: 1rem;
+$font-lg: 1.25rem;
+$font-xl: 1.5rem;
+$font-xxl: 2rem;
+
+$line-height-base: 1.55;
+
+// --- Shape and depth -------------------------------------------------------
+$radius-sm: 0.25rem;
+$radius-md: 0.5rem;
+$radius-lg: 1rem;
+
+$shadow-sm: 0 1px 3px rgba(34, 48, 42, 0.1);
+$shadow-md: 0 4px 10px rgba(34, 48, 42, 0.09);
+$shadow-lg: 0 12px 24px rgba(34, 48, 42, 0.1);
+
+// --- Spacing ---------------------------------------------------------------
+$spacing-xs: 0.25rem;
+$spacing-sm: 0.5rem;
+$spacing-md: 1rem;
+$spacing-lg: 1.5rem;
+$spacing-xl: 2rem;
+
+// --- Breakpoints -----------------------------------------------------------
+$mobile: 480px;
+$tablet: 768px;
+$desktop: 1024px;

@@ -1,40 +1,53 @@
+// Legacy variable names kept for the app's existing SCSS.
+// The real values live in _tokens.scss so Bootstrap and these stay in sync.
+
+@use './tokens' as t;
+
 // Colors
-$primary-color: #2ecc71;
-$secondary-color: #3498db;
-$danger-color: #e74c3c;
-$warning-color: #f39c12;
-$success-color: #27ae60;
-$dark-color: #2c3e50;
-$light-color: #ecf0f1;
-$white: #ffffff;
-$gray: #95a5a6;
+$primary-color: t.$brand-primary;
+$secondary-color: t.$brand-secondary;
+$accent-color: t.$brand-accent;
+$tertiary-color: t.$brand-tertiary;
+$info-color: t.$brand-info;
+$danger-color: t.$brand-danger;
+$warning-color: t.$brand-warning;
+$success-color: t.$brand-success;
+$dark-color: t.$brand-ink;
+$light-color: t.$brand-canvas;
+$white: t.$brand-surface;
+$gray: t.$brand-muted;
 
 // Spacing
-$spacing-xs: 0.25rem;
-$spacing-sm: 0.5rem;
-$spacing-md: 1rem;
-$spacing-lg: 1.5rem;
-$spacing-xl: 2rem;
+$spacing-xs: t.$spacing-xs;
+$spacing-sm: t.$spacing-sm;
+$spacing-md: t.$spacing-md;
+$spacing-lg: t.$spacing-lg;
+$spacing-xl: t.$spacing-xl;
 
 // Font sizes
-$font-xs: 0.75rem;
-$font-sm: 0.875rem;
-$font-md: 1rem;
-$font-lg: 1.25rem;
-$font-xl: 1.5rem;
-$font-xxl: 2rem;
+$font-xs: t.$font-xs;
+$font-sm: t.$font-sm;
+$font-md: t.$font-md;
+$font-lg: t.$font-lg;
+$font-xl: t.$font-xl;
+$font-xxl: t.$font-xxl;
+
+// Font families
+$font-sans: t.$font-sans;
+$font-serif: t.$font-serif;
+$font-script: t.$font-script;
 
 // Border radius
-$border-radius-sm: 0.25rem;
-$border-radius-md: 0.5rem;
-$border-radius-lg: 1rem;
+$border-radius-sm: t.$radius-sm;
+$border-radius-md: t.$radius-md;
+$border-radius-lg: t.$radius-lg;
 
 // Shadows
-$shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
-$shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
-$shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+$shadow-sm: t.$shadow-sm;
+$shadow-md: t.$shadow-md;
+$shadow-lg: t.$shadow-lg;
 
 // Breakpoints
-$mobile: 480px;
-$tablet: 768px;
-$desktop: 1024px;
+$mobile: t.$mobile;
+$tablet: t.$tablet;
+$desktop: t.$desktop;

@@ -1,16 +1,24 @@
-import { useEffect, useState } from 'react';
-import type { PlayerProfile, Tournament, TournamentSessionFormat } from '../types/index.ts';
-import type { TournamentMatchupFormat } from '../types/index.ts';
+import { useEffect, useMemo, useState } from 'react';
+import type {
+  GameState,
+  PlayerProfile,
+  Scorecard,
+  Tournament,
+  TournamentMatchupFormat,
+  TournamentSession,
+  TournamentSessionFormat,
+} from '../types/index.ts';
 import { saveTournamentSessions, subscribeToTournament } from '../firebase/tournaments';
+import { createRound, loadRound } from '../firebase/rounds';
 import {
+  buildMatchRoundScores,
   calculateStandings,
   createSessionWithConfig,
-  POINTS_FOR_TIE,
-  POINTS_FOR_WIN,
-  getSessionFormatLabel,
-  getTournamentSessionFormats,
-  resolveMatchup,
+  getSessionFormatDefinition,
 } from '../tournaments/scoring';
+import { buildMatchRoundState } from '../tournaments/roundBuilder';
+import TournamentSessions from './TournamentSessions';
+import type { MatchDraft } from './TournamentMatchBuilder';
 import './TournamentDashboard.scss';
 
 interface TournamentDashboardProps {
@@ -18,8 +26,10 @@ interface TournamentDashboardProps {
   initialTournament?: Tournament | null;
   sessionFormats?: TournamentSessionFormat[];
   playerProfiles: PlayerProfile[];
+  scorecards: Scorecard[];
   clientId: string;
   onManage: () => void;
+  onOpenRound: (roundId: string) => void;
 }
 
 export default function TournamentDashboard({
@@ -27,16 +37,16 @@ export default function TournamentDashboard({
   initialTournament,
   sessionFormats = [],
   playerProfiles,
+  scorecards,
   clientId,
   onManage,
+  onOpenRound,
 }: TournamentDashboardProps) {
   const [tournament, setTournament] = useState<Tournament | null>(initialTournament ?? null);
   const [error, setError] = useState('');
-  const [isAddingSession, setIsAddingSession] = useState(false);
-  const [isDeletingSessionId, setIsDeletingSessionId] = useState<string | null>(null);
-  const [isSessionFormOpen, setIsSessionFormOpen] = useState(false);
-  const [newSessionName, setNewSessionName] = useState('');
-  const [newSessionFormat, setNewSessionFormat] = useState<TournamentMatchupFormat>('singles');
+  const [sessionError, setSessionError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [roundStates, setRoundStates] = useState<Record<string, GameState>>({});
 
   useEffect(() => {
     const unsubscribe = subscribeToTournament(
@@ -51,93 +61,207 @@ export default function TournamentDashboard({
     return unsubscribe;
   }, [tournamentId]);
 
-  const getPlayerName = (playerId: string) => {
-    const profile = playerProfiles.find((p) => p.id === playerId);
-    if (!profile) return 'Unknown player';
-    return profile.nickname?.trim() || `${profile.firstName} ${profile.lastName}`;
-  };
+  const storedSessions = useMemo<TournamentSession[]>(
+    () => tournament?.sessions ?? tournament?.rounds ?? [],
+    [tournament]
+  );
 
-  const getEntryName = (entryId: string) => {
-    const entry = tournament?.entries.find((e) => e.id === entryId);
-    if (!entry) return 'Unassigned';
-    return entry.name.trim() || getPlayerName(entry.playerIds[0] ?? '');
-  };
+  const roundIdKey = useMemo(
+    () =>
+      storedSessions
+        .flatMap((session) => session.matchups.map((matchup) => matchup.roundId ?? ''))
+        .filter(Boolean)
+        .sort()
+        .join(','),
+    [storedSessions]
+  );
 
-  const openSessionForm = () => {
-    if (!tournament) return;
+  // Matches are played as normal rounds, so pull their live scores back for the leaderboard.
+  useEffect(() => {
+    const roundIds = roundIdKey ? roundIdKey.split(',') : [];
 
-    const existingSessions = tournament.sessions ?? tournament.rounds ?? [];
-    const formatOptions = getTournamentSessionFormats(sessionFormats);
-    setNewSessionName(`Session ${existingSessions.length + 1}`);
-    setNewSessionFormat(formatOptions[0]?.id ?? 'singles');
-    setError('');
-    setIsSessionFormOpen(true);
-  };
-
-  const cancelSessionForm = () => {
-    setIsSessionFormOpen(false);
-    setNewSessionName('');
-    setNewSessionFormat(getTournamentSessionFormats(sessionFormats)[0]?.id ?? 'singles');
-  };
-
-  const addSession = async () => {
-    if (!tournament) return;
-
-    const sessionName = newSessionName.trim();
-    if (!sessionName) {
-      setError('Enter a session name.');
+    if (!roundIds.length) {
+      setRoundStates({});
       return;
     }
 
-    setIsAddingSession(true);
-    setError('');
+    let cancelled = false;
 
-    const existingSessions = tournament.sessions ?? tournament.rounds ?? [];
+    void Promise.all(
+      roundIds.map(async (roundId) => {
+        try {
+          return [roundId, await loadRound(roundId)] as const;
+        } catch {
+          return [roundId, null] as const;
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return;
 
-    const nextSessions = [
-      ...existingSessions,
-      createSessionWithConfig(existingSessions.length, sessionName, newSessionFormat),
-    ];
+      const next: Record<string, GameState> = {};
+      entries.forEach(([roundId, state]) => {
+        if (state) next[roundId] = state;
+      });
+      setRoundStates(next);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [roundIdKey]);
+
+  const sessions = useMemo<TournamentSession[]>(
+    () =>
+      storedSessions.map((session) => {
+        const format = getSessionFormatDefinition(session.format, sessionFormats);
+
+        return {
+          ...session,
+          matchups: session.matchups.map((matchup) => {
+            const roundState = matchup.roundId ? roundStates[matchup.roundId] : undefined;
+            if (!roundState) return matchup;
+
+            // The round carries the player handicaps actually used for scoring.
+            const handicapOf = (playerId: string): number | null => {
+              const fromRound = roundState.players.find((player) => player.id === playerId)?.handicap;
+              if (Number.isFinite(fromRound)) return fromRound as number;
+
+              const fromProfile = playerProfiles.find((profile) => profile.id === playerId)?.handicap;
+              return Number.isFinite(fromProfile) ? (fromProfile as number) : null;
+            };
+
+            const { sideScores } = buildMatchRoundScores(
+              matchup,
+              format,
+              session.holes,
+              roundState.scores,
+              roundState.holeDetails,
+              handicapOf
+            );
+
+            return {
+              ...matchup,
+              sides: matchup.sides.map((side, sideIndex) => ({
+                ...side,
+                scores: sideScores[sideIndex] ?? side.scores,
+              })),
+            };
+          }),
+        };
+      }),
+    [storedSessions, roundStates, sessionFormats, playerProfiles]
+  );
+
+  const persistSessions = async (nextSessions: TournamentSession[]) => {
+    setIsSaving(true);
+    setSessionError('');
 
     try {
-      // Write straight through so a session can be added mid-tournament without opening the editor.
       await saveTournamentSessions(tournamentId, nextSessions, clientId);
-      setTournament({ ...tournament, sessions: nextSessions, rounds: nextSessions });
-      cancelSessionForm();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not add the session.');
+      setSessionError(saveError instanceof Error ? saveError.message : 'Could not save sessions.');
     } finally {
-      setIsAddingSession(false);
+      setIsSaving(false);
     }
   };
 
-  const deleteSession = async (sessionId: string) => {
-    if (!tournament) {
+  const handleCreateSession = (name: string, format: TournamentMatchupFormat, holes: number) => {
+    void persistSessions([
+      ...sessions,
+      createSessionWithConfig(sessions.length, name, format, holes),
+    ]);
+  };
+
+  const handleUpdateSession = (
+    sessionId: string,
+    name: string,
+    format: TournamentMatchupFormat,
+    holes: number
+  ) => {
+    void persistSessions(
+      sessions.map((session) =>
+        session.id === sessionId
+          ? { ...session, name: name.trim() || session.name, format, holes }
+          : session
+      )
+    );
+  };
+
+  const handleDeleteSession = (sessionId: string) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+
+    if (!window.confirm(`Delete ${session.name}? This cannot be undone.`)) {
       return;
     }
 
-    const session = (tournament.sessions ?? tournament.rounds ?? []).find((item) => item.id === sessionId);
-    if (!session) {
-      return;
-    }
+    void persistSessions(sessions.filter((item) => item.id !== sessionId));
+  };
 
-    const confirmed = window.confirm(`Delete ${session.name}? This cannot be undone.`);
-    if (!confirmed) {
-      return;
-    }
+  const handleToggleConfirmed = (sessionId: string, matchupId: string, confirmed: boolean) => {
+    void persistSessions(
+      sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              matchups: session.matchups.map((matchup) =>
+                matchup.id === matchupId ? { ...matchup, confirmed } : matchup
+              ),
+            }
+          : session
+      )
+    );
+  };
 
-    setIsDeletingSessionId(sessionId);
-    setError('');
+  const handleCreateMatch = async (sessionId: string, draft: MatchDraft) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session || !tournament) return;
 
-    const nextSessions = (tournament.sessions ?? tournament.rounds ?? []).filter((item) => item.id !== sessionId);
+    setIsSaving(true);
+    setSessionError('');
 
     try {
-      await saveTournamentSessions(tournamentId, nextSessions, clientId);
-      setTournament({ ...tournament, sessions: nextSessions, rounds: nextSessions });
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not delete the session.');
+      const roundState = buildMatchRoundState({
+        sides: draft.sides,
+        entries: tournament.entries,
+        playerProfiles,
+        formatDefinition: getSessionFormatDefinition(session.format, sessionFormats),
+        scorecard: draft.scorecard,
+        setIndexes: draft.setIndexes,
+        holes: session.holes,
+        matchName: draft.name,
+      });
+
+      const roundId = await createRound(roundState, clientId);
+
+      await saveTournamentSessions(
+        tournamentId,
+        sessions.map((item) =>
+          item.id === sessionId
+            ? {
+                ...item,
+                matchups: [
+                  ...item.matchups,
+                  {
+                    id: roundId,
+                    confirmed: false,
+                    roundId,
+                    name: draft.name,
+                    scorecardName: draft.scorecard.name,
+                    sides: draft.sides,
+                  },
+                ],
+              }
+            : item
+        ),
+        clientId
+      );
+    } catch (createError) {
+      setSessionError(
+        createError instanceof Error ? createError.message : 'Could not create the match.'
+      );
     } finally {
-      setIsDeletingSessionId(null);
+      setIsSaving(false);
     }
   };
 
@@ -151,10 +275,22 @@ export default function TournamentDashboard({
     );
   }
 
-  const standings = calculateStandings(tournament, { playerProfiles });
-  const sessions = tournament.sessions ?? tournament.rounds ?? [];
-  const allFormats = getTournamentSessionFormats(sessionFormats);
-  const totalMatches = sessions.reduce((sum, session) => sum + session.matchups.length, 0);
+  const getPlayerName = (playerId: string) => {
+    const profile = playerProfiles.find((p) => p.id === playerId);
+    if (!profile) return 'Unknown player';
+    return profile.nickname?.trim() || `${profile.firstName} ${profile.lastName}`;
+  };
+
+  const getEntryName = (entryId: string) => {
+    const entry = tournament.entries.find((e) => e.id === entryId);
+    if (!entry) return 'Unassigned';
+    return entry.name.trim() || getPlayerName(entry.playerIds[0] ?? '');
+  };
+
+  const standings = calculateStandings(
+    { ...tournament, sessions },
+    { playerProfiles, scoresAreNet: true }
+  );  const totalMatches = sessions.reduce((sum, session) => sum + session.matchups.length, 0);
   const confirmedMatches = sessions.reduce(
     (sum, session) => sum + session.matchups.filter((matchup) => matchup.confirmed).length,
     0
@@ -224,172 +360,21 @@ export default function TournamentDashboard({
         </table>
       </section>
 
-      {sessions.length === 0 && (
-        <p className="tournament-dashboard-empty">
-          No sessions yet. Add one to start scoring matches.
-        </p>
-      )}
-
-      {sessions.map((session) => {
-        return (
-        <section key={session.id} className="tournament-dashboard-section">
-          <div className="tournament-session-header">
-            <h3>
-              {session.name}
-              <span className="tournament-dashboard-code">
-                {getSessionFormatLabel(session.format, sessionFormats)}
-              </span>
-            </h3>
-            <div className="tournament-session-actions">
-              <button
-                type="button"
-                className="tournament-session-icon-btn"
-                onClick={onManage}
-                aria-label={`Edit ${session.name}`}
-                title="Edit session"
-              >
-                <i className="bi bi-pencil" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="tournament-session-icon-btn is-danger"
-                onClick={() => void deleteSession(session.id)}
-                disabled={isDeletingSessionId === session.id}
-                aria-label={`Delete ${session.name}`}
-                title="Delete session"
-              >
-                <i className="bi bi-trash" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-
-          <div className="tournament-dashboard-games">
-            {session.matchups.map((matchup, index) => {
-              const result = resolveMatchup(matchup, session.format, sessionFormats, { playerProfiles });
-              const status =
-                result.holesPlayed === 0
-                  ? 'Not started'
-                  : matchup.confirmed
-                    ? 'Confirmed'
-                    : result.isComplete
-                      ? 'Awaiting confirmation'
-                      : `Thru ${result.holesPlayed}`;
-
-              return (
-                <div
-                  key={matchup.id}
-                  className="tournament-dashboard-game"
-                >
-                  <header>
-                    <span className="game-index">Match {index + 1}</span>
-                    <span className="game-format">
-                      {getSessionFormatLabel(session.format, sessionFormats)}
-                    </span>
-                    <span
-                      className={`game-status${matchup.confirmed ? ' is-confirmed' : result.holesPlayed > 0 && !result.isComplete ? ' is-live' : ''}`}
-                    >
-                      {status}
-                    </span>
-                  </header>
-
-                  {matchup.sides.map((side, sideIndex) => {
-                    const isWinner = result.winningSideIndex === sideIndex;
-
-                    return (
-                      <div
-                        key={sideIndex}
-                        className={`game-side${isWinner ? ' is-winner' : ''}`}
-                      >
-                        <div className="game-side-names">
-                          <span className="game-side-team">{getEntryName(side.entryId)}</span>
-                          <span className="game-side-players">
-                            {side.playerIds.length
-                              ? side.playerIds.map(getPlayerName).join(' & ')
-                              : 'No players yet'}
-                          </span>
-                        </div>
-                        <div className="game-side-numbers">
-                          <span className="game-side-holes">{result.holesWon[sideIndex]}</span>
-                          <span className="game-side-total">{result.totals[sideIndex] || '—'}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  <footer>
-                    <span>
-                      {result.holesPlayed === 0
-                        ? 'Awaiting scores'
-                        : result.isTie
-                          ? `Halved · ${POINTS_FOR_TIE} point each`
-                          : `${getEntryName(matchup.sides[result.winningSideIndex ?? 0].entryId)} ${result.summary} · +${POINTS_FOR_WIN}`}
-                      {result.holesPlayed > 0 && !matchup.confirmed && ' (provisional)'}
-                    </span>
-                  </footer>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-        );
-      })}
-
-      <div className="tournament-dashboard-actions">
-        {isSessionFormOpen ? (
-          <div className="tournament-session-create-form">
-            <input
-              type="text"
-              value={newSessionName}
-              onChange={(event) => setNewSessionName(event.target.value)}
-              placeholder="Session name"
-              maxLength={40}
-              aria-label="Session name"
-              disabled={isAddingSession}
-            />
-            <select
-              value={newSessionFormat}
-              onChange={(event) => setNewSessionFormat(event.target.value as TournamentMatchupFormat)}
-              aria-label="Session format"
-              disabled={isAddingSession}
-            >
-              {allFormats.map((format) => (
-                <option key={format.id} value={format.id}>
-                  {format.name}
-                </option>
-              ))}
-            </select>
-            <div className="tournament-session-create-actions">
-              <button
-                type="button"
-                className="tournament-dashboard-add-round"
-                onClick={() => void addSession()}
-                disabled={isAddingSession}
-              >
-                {isAddingSession ? 'Creating...' : 'Create session'}
-              </button>
-              <button
-                type="button"
-                className="tournament-dashboard-add-round is-secondary"
-                onClick={cancelSessionForm}
-                disabled={isAddingSession}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="tournament-dashboard-add-round"
-            onClick={openSessionForm}
-          >
-            Add session
-          </button>
-        )}
-        <span className="tournament-dashboard-note">
-          Set formats, sides and scores in sessions.
-        </span>
-      </div>
+      <TournamentSessions
+        tournament={tournament}
+        sessions={sessions}
+        sessionFormats={sessionFormats}
+        playerProfiles={playerProfiles}
+        scorecards={scorecards}
+        isSaving={isSaving}
+        error={sessionError}
+        onCreateSession={handleCreateSession}
+        onUpdateSession={handleUpdateSession}
+        onDeleteSession={handleDeleteSession}
+        onCreateMatch={(sessionId, draft) => void handleCreateMatch(sessionId, draft)}
+        onToggleConfirmed={handleToggleConfirmed}
+        onOpenRound={onOpenRound}
+      />
     </div>
   );
 }

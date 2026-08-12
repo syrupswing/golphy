@@ -1,0 +1,44 @@
+// ---------------------------------------------------------------------------
+// Custom overrides layered on top of compiled Bootstrap.
+//
+// Anything here wins over Bootstrap's own rules. Keep personal styling tweaks
+// in this file so upgrading Bootstrap stays painless.
+// ---------------------------------------------------------------------------
+
+@use './tokens' as *;
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// Headings read better slightly tighter than Bootstrap's default.
+h1, h2, h3, h4, h5, h6 {
+  letter-spacing: -0.01em;
+}
+
+.card {
+  border-color: $brand-line;
+  box-shadow: $shadow-sm;
+}
+
+.btn {
+  font-weight: 600;
+}
+
+.form-label {
+  margin-bottom: $spacing-xs;
+  font-size: $font-xs;
+  font-weight: 700;
+  color: $brand-muted;
+  text-transform: none;
+}
+
+.table {
+  --bs-table-border-color: #{$brand-line};
+}
+
+// Tables are the one place allowed to scroll sideways on a phone.
+.table-responsive {
+  -webkit-overflow-scrolling: touch;
+}

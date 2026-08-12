@@ -47,8 +47,25 @@ const PLAYER_COLUMN_MIN_WIDTH = 44;
 const PLAYER_COLUMN_MAX_WIDTH = 280;
 const PLAYER_COLUMN_DEFAULT_WIDTH = 140;
 const PLAYER_COLUMN_WIDTH_STORAGE_KEY = 'golphy-player-column-width';
-const SCORE_OPTIONS = [2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
-const EXTENDED_SCORE_OPTIONS = [11, 12, 13, 14, 15] as const;
+const MIN_SCORE = 1;
+const MAX_SCORE = 20;
+const STEPPER_EXIT_MS = 130;
+
+// Extent of the stepper measured out from the centre of the value box.
+const STEPPER_REACH = { x: 71, above: 46, below: 62 };
+const STEPPER_VIEWPORT_MARGIN = 8;
+
+const clampStepperPosition = (centerX: number, centerY: number) => {
+  const minLeft = STEPPER_REACH.x + STEPPER_VIEWPORT_MARGIN;
+  const maxLeft = window.innerWidth - STEPPER_REACH.x - STEPPER_VIEWPORT_MARGIN;
+  const minTop = STEPPER_REACH.above + STEPPER_VIEWPORT_MARGIN;
+  const maxTop = window.innerHeight - STEPPER_REACH.below - STEPPER_VIEWPORT_MARGIN;
+
+  return {
+    left: maxLeft < minLeft ? centerX : Math.min(Math.max(centerX, minLeft), maxLeft),
+    top: maxTop < minTop ? centerY : Math.min(Math.max(centerY, minTop), maxTop),
+  };
+};
 
 interface ActiveScoreDialog {
   playerIds: string[];
@@ -56,6 +73,7 @@ interface ActiveScoreDialog {
   hole: number;
   par: number;
   currentScore: number | null;
+  anchor: { top: number; left: number };
 }
 
 interface ScoreRow {
@@ -151,12 +169,42 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
   });
   const [isResizingPlayerColumn, setIsResizingPlayerColumn] = React.useState(false);
   const [activeScoreDialog, setActiveScoreDialog] = React.useState<ActiveScoreDialog | null>(null);
-  const [showLowScoreOption, setShowLowScoreOption] = React.useState(false);
-  const [showExtendedScoreOptions, setShowExtendedScoreOptions] = React.useState(false);
+  const [draftScore, setDraftScore] = React.useState(0);
+  const [isStepperClosing, setIsStepperClosing] = React.useState(false);
   const activeResizeHandleRef = React.useRef<HTMLButtonElement | null>(null);
+  const stepperCloseTimeoutRef = React.useRef<number | null>(null);
+
+  const cancelPendingStepperClose = () => {
+    if (stepperCloseTimeoutRef.current !== null) {
+      window.clearTimeout(stepperCloseTimeoutRef.current);
+      stepperCloseTimeoutRef.current = null;
+    }
+  };
+
+  // Keeps the stepper mounted long enough to play its exit animation.
+  const closeScoreDialog = (immediate = false) => {
+    cancelPendingStepperClose();
+
+    if (immediate) {
+      setIsStepperClosing(false);
+      setActiveScoreDialog(null);
+      return;
+    }
+
+    setIsStepperClosing(true);
+    stepperCloseTimeoutRef.current = window.setTimeout(() => {
+      setActiveScoreDialog(null);
+      setIsStepperClosing(false);
+      stepperCloseTimeoutRef.current = null;
+    }, STEPPER_EXIT_MS);
+  };
+
+  React.useEffect(() => cancelPendingStepperClose, []);
 
   const handleTableScroll = (event: React.UIEvent<HTMLDivElement>) => {
     setHasHorizontalScrollOffset(event.currentTarget.scrollLeft > 0);
+    // The stepper is pinned to the cell's screen position, so scrolling dismisses it.
+    closeScoreDialog(true);
   };
 
   const clampPlayerColumnWidth = (width: number) =>
@@ -778,36 +826,46 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     return parValues.reduce((sum, par) => sum + par, 0);
   };
 
-  const getSetLabelForHole = (hole: number): string | null => {
-    const setIndex = Math.floor((hole - 1) / 9);
-    const label = setLabels?.[setIndex]?.trim() || holeGroups[setIndex]?.label;
-
-    if (!label || totalHoles <= 9) {
-      return null;
-    }
-
-    return label;
-  };
-
   React.useEffect(() => {
     if (!activeScoreDialog) {
       return;
     }
 
-    setShowLowScoreOption(activeScoreDialog.currentScore === 1);
-    setShowExtendedScoreOptions(
-      activeScoreDialog.currentScore !== null && activeScoreDialog.currentScore > SCORE_OPTIONS[SCORE_OPTIONS.length - 1]
-    );
-
-    const handleEscape = (event: KeyboardEvent) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setActiveScoreDialog(null);
+        closeScoreDialog();
+        return;
+      }
+
+      if (event.key === 'ArrowUp' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        setDraftScore((prev) => Math.min(MAX_SCORE, prev + 1));
+        return;
+      }
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') {
+        event.preventDefault();
+        setDraftScore((prev) => Math.max(MIN_SCORE, prev - 1));
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handleRowScoreChange(activeScoreDialog.playerIds, activeScoreDialog.hole, draftScore);
+        closeScoreDialog();
       }
     };
 
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [activeScoreDialog]);
+    window.addEventListener('keydown', handleKeyDown);
+    // The position is measured once, so a viewport change would leave it stale.
+    const handleViewportChange = () => closeScoreDialog(true);
+    window.addEventListener('resize', handleViewportChange);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleViewportChange);
+    };
+  }, [activeScoreDialog, draftScore]);
 
   const handleScoreChange = (playerId: string, hole: number, value: string | number) => {
     if (!onScoreUpdate) return;
@@ -833,32 +891,45 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     });
   };
 
-  const openScoreDialog = (playerIds: string[], playerName: string, hole: number, par: number) => {
+  const openScoreDialog = (
+    playerIds: string[],
+    playerName: string,
+    hole: number,
+    par: number,
+    anchorElement: HTMLElement
+  ) => {
+    const rect = anchorElement.getBoundingClientRect();
+    const currentScore = getScore(playerIds[0], hole);
+
+    cancelPendingStepperClose();
+    setIsStepperClosing(false);
+    setDraftScore(currentScore ?? par);
     setActiveScoreDialog({
       playerIds,
       playerName,
       hole,
       par,
-      currentScore: getScore(playerIds[0], hole),
+      currentScore,
+      anchor: clampStepperPosition(rect.left + rect.width / 2, rect.top + rect.height / 2),
     });
   };
 
-  const applyScoreSelection = (strokes: number) => {
+  const applyDraftScore = () => {
     if (!activeScoreDialog) {
       return;
     }
 
-    handleRowScoreChange(activeScoreDialog.playerIds, activeScoreDialog.hole, strokes);
-    setActiveScoreDialog(null);
+    handleRowScoreChange(activeScoreDialog.playerIds, activeScoreDialog.hole, draftScore);
+    closeScoreDialog();
   };
 
-  const clearScoreSelection = () => {
+  const clearDraftScore = () => {
     if (!activeScoreDialog) {
       return;
     }
 
     handleRowScoreChange(activeScoreDialog.playerIds, activeScoreDialog.hole, 0);
-    setActiveScoreDialog(null);
+    closeScoreDialog();
   };
 
   const renderHoleCell = (row: ScoreRow, hole: number, par: number) => {
@@ -922,7 +993,7 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
         <button
           type="button"
           className="score-entry-btn"
-          onClick={() => openScoreDialog(row.playerIds, row.label, hole, par)}
+          onClick={(event) => openScoreDialog(row.playerIds, row.label, hole, par, event.currentTarget)}
           aria-label={`${row.label}, hole ${hole}, ${score ?? 'no score'}, par ${par}${outcomeLabel}${strokesLabel}${netLabel}`}
         >
           {showNetScore && netScore !== null ? (
@@ -940,7 +1011,6 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
 
   return (
     <div className="score-table-container">
-      {roundTitle && <h2 className="course-name-heading">{roundTitle}</h2>}
       {tournamentName && (
         <div className="round-tournament-row">
           {onTournamentLinkClick && (
@@ -957,9 +1027,10 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
           <p className="round-tournament-name">{tournamentName}</p>
         </div>
       )}
+      {roundTitle && <h2 className="course-name-heading">{roundTitle}</h2>}
       {scrambleSideStrokes && matchup?.teams?.length && (
-        <>
-          <p className="matchup-handicap-note">
+        <details className="matchup-handicap-disclosure">
+          <summary>
             Team handicap: {scrambleSideStrokes.sideHandicaps[0]} vs {scrambleSideStrokes.sideHandicaps[1]}.{' '}
             {(() => {
               const side0Total = Object.values(scrambleSideStrokes.bySide[0]).reduce((sum, value) => sum + value, 0);
@@ -977,36 +1048,33 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
 
               return 'No strokes given.';
             })()}
-          </p>
-          <details className="matchup-handicap-disclosure">
-            <summary>Show handicap calculation details</summary>
-            <div className="matchup-handicap-breakdown">
-              {([0, 1] as const).map((sideIndex) => {
-                const detail = scrambleSideStrokes.details[sideIndex];
-                const teamName = matchup.teams[sideIndex]?.name || `Side ${sideIndex + 1}`;
+          </summary>
+          <div className="matchup-handicap-breakdown">
+            {([0, 1] as const).map((sideIndex) => {
+              const detail = scrambleSideStrokes.details[sideIndex];
+              const teamName = matchup.teams[sideIndex]?.name || `Side ${sideIndex + 1}`;
 
-                return (
-                  <div key={teamName} className="matchup-handicap-side-detail">
-                    <strong>{teamName}</strong>
-                    <span>
-                      Low handicap player: {detail.playerNames[0]} ({detail.playerHandicaps[0]}) x {matchup.handicapRule?.lowPercentage ?? 0}
-                      {' '}= {detail.weightedLow.toFixed(2)}
-                    </span>
-                    <span>
-                      High handicap player: {detail.playerNames[1]} ({detail.playerHandicaps[1]}) x {matchup.handicapRule?.highPercentage ?? 0}
-                      {' '}= {detail.weightedHigh.toFixed(2)}
-                    </span>
-                    <span>Raw team handicap: {detail.rawTeamHandicap.toFixed(2)}</span>
-                    {matchup.handicapRule?.prorateByHoles !== false && (
-                      <span>Prorated for {totalHoles} holes: {detail.effectiveTeamHandicap.toFixed(2)}</span>
-                    )}
-                    <span>Rounded team handicap: {scrambleSideStrokes.sideHandicaps[sideIndex]}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </details>
-        </>
+              return (
+                <div key={teamName} className="matchup-handicap-side-detail">
+                  <strong>{teamName}</strong>
+                  <span>
+                    Low handicap player: {detail.playerNames[0]} ({detail.playerHandicaps[0]}) x {matchup.handicapRule?.lowPercentage ?? 0}
+                    {' '}= {detail.weightedLow.toFixed(2)}
+                  </span>
+                  <span>
+                    High handicap player: {detail.playerNames[1]} ({detail.playerHandicaps[1]}) x {matchup.handicapRule?.highPercentage ?? 0}
+                    {' '}= {detail.weightedHigh.toFixed(2)}
+                  </span>
+                  <span>Raw team handicap: {detail.rawTeamHandicap.toFixed(2)}</span>
+                  {matchup.handicapRule?.prorateByHoles !== false && (
+                    <span>Prorated for {totalHoles} holes: {detail.effectiveTeamHandicap.toFixed(2)}</span>
+                  )}
+                  <span>Rounded team handicap: {scrambleSideStrokes.sideHandicaps[sideIndex]}</span>
+                </div>
+              );
+            })}
+          </div>
+        </details>
       )}
       <div
         className={`table-wrapper${hasHorizontalScrollOffset ? ' is-scrolled-x' : ''}${isResizingPlayerColumn ? ' is-resizing-col' : ''}`}
@@ -1063,7 +1131,12 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
               {holeGroups.map((group) => (
                 <React.Fragment key={group.label}>
                   {group.holes.map((hole) => (
-                    <th key={hole} className="hole-header">{hole}</th>
+                    <th
+                      key={hole}
+                      className={`hole-header${activeScoreDialog?.hole === hole ? ' is-active' : ''}`}
+                    >
+                      {hole}
+                    </th>
                   ))}
                   <th className="total-header">{group.label}</th>
                 </React.Fragment>
@@ -1121,7 +1194,11 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
             {scoreRows.map((row, rowIndex) => (
               <React.Fragment key={row.id}>
               <tr className="player-row">
-                <td className="player-cell">
+                <td
+                  className={`player-cell${
+                    activeScoreDialog?.playerIds.includes(row.primaryPlayerId) ? ' is-active' : ''
+                  }`}
+                >
                   <div className="player-info">
                     <div className="player-meta">
                       <OverflowFadeText text={row.label} className="player-name" />
@@ -1186,108 +1263,67 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
         </table>
       </div>
       {activeScoreDialog && (
-        <div className="score-dialog-backdrop" role="presentation" onClick={() => setActiveScoreDialog(null)}>
+        <>
           <div
-            className="score-dialog"
+            className={`score-stepper-backdrop${isStepperClosing ? ' is-closing' : ''}`}
+            role="presentation"
+            onClick={() => closeScoreDialog()}
+          />
+          <div
+            className={`score-stepper${isStepperClosing ? ' is-closing' : ''}`}
             role="dialog"
             aria-modal="true"
-            aria-label="Choose a score"
-            onClick={(event) => event.stopPropagation()}
+            aria-label={`Score for ${activeScoreDialog.playerName}, hole ${activeScoreDialog.hole}`}
+            style={{
+              top: activeScoreDialog.anchor.top,
+              left: activeScoreDialog.anchor.left,
+            }}
           >
-            <div className="score-dialog-header">
-              <div className="score-dialog-heading-group">
-                <strong>
-                  Hole {activeScoreDialog.hole}
-                  {getSetLabelForHole(activeScoreDialog.hole) ? ` · ${getSetLabelForHole(activeScoreDialog.hole)}` : ''}
-                </strong>
-                <span>{activeScoreDialog.playerName}</span>
-              </div>
+            <div className="score-stepper-dial">
               <button
                 type="button"
-                className="score-dialog-close-btn"
-                aria-label="Close score picker"
-                onClick={() => setActiveScoreDialog(null)}
+                className="score-stepper-step is-decrease"
+                aria-label="Lower score"
+                disabled={draftScore <= MIN_SCORE}
+                onClick={() => setDraftScore((prev) => Math.max(MIN_SCORE, prev - 1))}
               >
-                X
+                <i className="bi bi-dash-lg" aria-hidden="true" />
               </button>
-            </div>
-            <div className="score-dialog-edge-action">
-              <button
-                type="button"
-                className={`score-edge-toggle${showLowScoreOption ? ' active' : ''}`}
-                aria-label="Show score below 2"
-                onClick={() => setShowLowScoreOption((prev) => !prev)}
-              >
-                -
-              </button>
-            </div>
-            {showLowScoreOption && (
-              <div className="score-dialog-edge-action revealed-score-action">
-                <button
-                  type="button"
-                  className={`score-option-btn edge-option${activeScoreDialog.currentScore === 1 ? ' selected' : ''}${activeScoreDialog.par === 1 ? ' par-option' : ''}`}
-                  onClick={() => applyScoreSelection(1)}
-                >
-                  <span className="score-option-value">1</span>
-                  <span className="score-option-label">{activeScoreDialog.par === 1 ? 'Par' : ''}</span>
-                </button>
-              </div>
-            )}
-            <div className="score-dialog-grid">
-              {SCORE_OPTIONS.map((value) => {
-                const isPar = value === activeScoreDialog.par;
-                const isSelected = value === activeScoreDialog.currentScore;
 
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`score-option-btn${isPar ? ' par-option' : ''}${isSelected ? ' selected' : ''}`}
-                    onClick={() => applyScoreSelection(value)}
-                  >
-                    <span className="score-option-value">{value}</span>
-                    <span className="score-option-label">{isPar ? 'Par' : ''}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="score-dialog-edge-action">
+              <output className="score-stepper-value" aria-live="polite">
+                {draftScore}
+              </output>
+
               <button
                 type="button"
-                className={`score-edge-toggle${showExtendedScoreOptions ? ' active' : ''}`}
-                aria-label="Show scores above 10"
-                onClick={() => setShowExtendedScoreOptions((prev) => !prev)}
+                className="score-stepper-step is-increase"
+                aria-label="Raise score"
+                disabled={draftScore >= MAX_SCORE}
+                onClick={() => setDraftScore((prev) => Math.min(MAX_SCORE, prev + 1))}
               >
-                +
+                <i className="bi bi-plus-lg" aria-hidden="true" />
               </button>
-            </div>
-            {showExtendedScoreOptions && (
-              <div className="score-dialog-grid extended-grid">
-                {EXTENDED_SCORE_OPTIONS.map((value) => {
-                  const isPar = value === activeScoreDialog.par;
-                  const isSelected = value === activeScoreDialog.currentScore;
 
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      className={`score-option-btn${isPar ? ' par-option' : ''}${isSelected ? ' selected' : ''}`}
-                      onClick={() => applyScoreSelection(value)}
-                    >
-                      <span className="score-option-value">{value}</span>
-                      <span className="score-option-label">{isPar ? 'Par' : ''}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            <div className="score-dialog-actions">
-              <button type="button" className="score-dialog-btn danger" onClick={clearScoreSelection}>
-                Clear score
+              <button
+                type="button"
+                className="score-stepper-action is-cancel"
+                aria-label="Clear score"
+                onClick={clearDraftScore}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+
+              <button
+                type="button"
+                className="score-stepper-action is-confirm"
+                aria-label="Save score"
+                onClick={applyDraftScore}
+              >
+                <i className="bi bi-check-lg" aria-hidden="true" />
               </button>
             </div>
           </div>
-        </div>
+        </>
       )}
       <div className="legend">
         <div className="legend-item">

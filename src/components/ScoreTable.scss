@@ -5,6 +5,9 @@
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
+  // Room to scroll the last rows clear of the viewport edge so the score
+  // stepper, which hangs below the tapped cell, is never clipped.
+  padding-bottom: 40px;
 
   .course-name-heading {
     font-size: $font-lg;
@@ -17,7 +20,12 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    margin: 0 12px 10px;
+    margin: 20px 12px 0;
+  }
+
+  // The breadcrumb owns the top spacing when it leads the page.
+  .round-tournament-row + .course-name-heading {
+    margin-top: 4px;
   }
 
   .round-tournament-back-btn {
@@ -58,14 +66,6 @@
     text-align: left;
   }
 
-  .matchup-handicap-note {
-    margin: 0 12px 10px;
-    color: color.adjust($dark-color, $lightness: 14%);
-    font-size: $font-xs;
-    font-weight: 600;
-    text-align: left;
-  }
-
   .matchup-handicap-disclosure {
     margin: 0 12px 12px;
     border: 1px solid color.adjust($light-color, $lightness: -12%);
@@ -75,9 +75,9 @@
 
     summary {
       cursor: pointer;
+      color: color.adjust($dark-color, $lightness: 14%);
       font-size: $font-xs;
-      font-weight: 700;
-      color: color.adjust($dark-color, $lightness: 10%);
+      font-weight: 600;
       text-align: left;
     }
   }
@@ -281,6 +281,12 @@
 
       &.hole-header {
         min-width: 35px;
+
+        // Marks the hole being scored while the stepper is open.
+        &.is-active {
+          background: color.adjust($primary-color, $lightness: 40%);
+          color: $gray;
+        }
       }
 
       &.total-header {
@@ -410,7 +416,7 @@
 
     .player-row {
       color: #888;
-      font-family: 'Nanum Brush Script', cursive;
+      font-family: $font-script;
       font-size: 28px;
       line-height: 1;
 
@@ -424,6 +430,11 @@
         width: var(--player-column-width);
         max-width: var(--player-column-width);
         padding: 4px 8px;
+
+        // Marks the player being scored while the stepper is open.
+        &.is-active {
+          background: color.adjust($primary-color, $lightness: 52%);
+        }
 
         &::after {
           content: '';
@@ -481,7 +492,7 @@
             overflow: hidden;
             white-space: nowrap;
             text-overflow: clip;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            font-family: $font-sans;
             font-size: 10px;
             font-weight: 600;
             line-height: 1.1;
@@ -511,7 +522,7 @@
             border-radius: 999px;
             background: color.adjust($light-color, $lightness: -4%);
             color: $dark-color;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            font-family: $font-sans;
             font-size: $font-xs;
             font-weight: 700;
             line-height: 1.4;
@@ -523,7 +534,7 @@
         font-weight: 500;
         font-size: $font-md;
         transition: border 0.2s ease;
-        font-family: 'Nanum Brush Script', cursive;
+        font-family: $font-script;
         font-size: 40px;
         line-height: 1;
         color: $gray;
@@ -543,7 +554,7 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          font-family: 'Nanum Brush Script', cursive;
+          font-family: $font-script;
           font-size: 36px;
           line-height: 1;
           text-align: center;
@@ -761,7 +772,7 @@
         }
 
         &.bold {
-          background: color.adjust($primary-color, $lightness: 35%);
+          background: color.adjust($primary-color, $lightness: 65%);
           font-weight: 600;
         }
       }
@@ -781,304 +792,162 @@
   }
 }
 
-.score-dialog-backdrop {
+.score-stepper-backdrop {
   position: fixed;
   inset: 0;
   z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: $spacing-sm;
-  background: rgba(13, 25, 35, 0.42);
-  backdrop-filter: blur(4px);
+  // Transparent so the highlighted row and column headers stay readable.
+  background: transparent;
+
+  &.is-closing {
+    pointer-events: none;
+  }
 }
 
-.score-dialog {
-  width: min(100%, 420px);
-  max-width: calc(100vw - (#{$spacing-sm} * 2));
-  max-height: calc(100dvh - (#{$spacing-sm} * 2));
-  background: $white;
-  border-radius: $border-radius-lg;
-  box-shadow: $shadow-md;
-  padding: $spacing-lg;
+@keyframes score-stepper-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes score-stepper-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.82);
+  }
+}
+
+.score-stepper {
+  position: fixed;
+  z-index: 50;
+  transform: translate(-50%, -50%);
   display: flex;
+  border-radius: 8px;
   flex-direction: column;
-  gap: $spacing-md;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.score-dialog-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: $spacing-sm;
-
-  .score-dialog-heading-group {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  strong {
-    font-size: $font-lg;
-    color: $dark-color;
-    line-height: 1.2;
-    text-align: left;
-  }
-
-  span {
-    font-size: $font-sm;
-    color: $gray;
-    font-weight: 600;
-    text-align: left;
-  }
-}
-
-.score-dialog-close-btn {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: color.adjust($light-color, $lightness: -1%);
-  border: 1px solid color.adjust($light-color, $lightness: -10%);
-  color: $dark-color;
-  font-size: $font-lg;
-  font-weight: 700;
-
-  &:hover {
-    background: color.adjust($light-color, $lightness: -4%);
-  }
-}
-
-.score-dialog-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: $spacing-sm;
-  flex-shrink: 0;
-
-  &.extended-grid {
-    margin-top: -4px;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-}
-
-.score-dialog-edge-action {
-  display: flex;
-  justify-content: center;
-  flex-shrink: 0;
-
-  .edge-option {
-    width: min(100%, 112px);
-    min-height: 56px;
-  }
-}
-
-.revealed-score-action {
-  margin-top: -4px;
-}
-
-.score-edge-toggle {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  padding: 0;
-  border: 1px solid color.adjust($light-color, $lightness: -24%);
-  background: $white;
-  color: $dark-color;
-  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 700;
+  gap: 6px;
+  box-shadow: 1px 1px 8px rgba(20, 20, 20, .5);
+  animation: score-stepper-in 180ms cubic-bezier(0.34, 1.4, 0.5, 1) both;
 
-  &.active {
-    background: color.adjust($primary-color, $lightness: 42%);
-    border-color: color.adjust($primary-color, $lightness: 12%);
+  &.is-closing {
+    animation: score-stepper-out 130ms ease-in both;
+    pointer-events: none;
   }
 }
 
-.score-option-btn {
-  min-height: 68px;
-  border-radius: $border-radius-md;
-  border: 1px solid color.adjust($light-color, $lightness: -12%);
-  background: color.adjust($light-color, $lightness: 2%);
+.score-stepper-dial {
   position: relative;
+}
+
+.score-stepper-value {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: $spacing-sm;
+  width: 92px;
+  height: 92px;
+  border-radius: $border-radius-md;
+  background: $white;
+  border: 2px solid $primary-color;
+  box-shadow: $shadow-md;
   color: $dark-color;
-  transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
-
-  &:hover {
-    transform: translateY(-1px);
-    background: color.adjust($light-color, $lightness: -2%);
-  }
-
-  &.selected {
-    border-color: color.adjust($secondary-color, $lightness: -8%);
-    box-shadow: inset 0 0 0 2px color.adjust($secondary-color, $lightness: -8%);
-  }
-
-  &.extended-toggle {
-    background: color.adjust($secondary-color, $lightness: 44%);
-    border-color: color.adjust($secondary-color, $lightness: 16%);
-  }
-}
-
-.score-option-value {
-  font-family: inherit;
+  font-size: 46px;
   font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 36px;
   line-height: 1;
-  transform: none;
-
-  .extended-toggle & {
-    font-size: $font-xxl;
-    font-weight: 700;
-    transform: none;
-  }
 }
 
-.score-option-label {
+.score-stepper .score-stepper-dial .score-stepper-step {
   position: absolute;
   top: 8px;
-  left: 8px;
-  min-height: 0;
-  line-height: 1;
-  font-size: $font-xs;
-  font-weight: 700;
-  color: color.adjust($dark-color, $lightness: 14%);
-  pointer-events: none;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: $white;
+  border: 2px solid $primary-color;
+  color: $primary-color;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: $shadow-sm;
+  transition: transform 0.12s ease;
 
-  &:empty {
-    display: none;
+  .bi {
+    font-size: 20px;
+    line-height: 1;
   }
 
-  &:not(:empty) {
-    opacity: 0.5;
+  &.is-decrease {
+    left: -16px;
   }
-}
 
-.score-dialog-actions {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: $spacing-sm;
-  margin-top: auto;
-  flex-shrink: 0;
-}
+  &.is-increase {
+    right: -16px;
+  }
 
-.score-dialog-btn {
-  width: 100%;
-  padding: $spacing-sm $spacing-md;
-  border-radius: $border-radius-sm;
-  font-weight: 600;
+  // Keeps the vertical centring while pressing, so the button shrinks in place.
+  &:active {
+    transform: translateY(-50%) scale(0.85);
+  }
 
   &:disabled {
-    background: color.adjust($light-color, $lightness: -4%);
-    color: $gray;
-    border-color: color.adjust($light-color, $lightness: -12%);
+    opacity: 0.4;
     cursor: not-allowed;
   }
+}
 
-  &.secondary {
-    background: $light-color;
-    color: $dark-color;
-    border: 1px solid color.adjust($light-color, $lightness: -12%);
+.score-stepper .score-stepper-action {
+  position: absolute;
+  bottom: -12px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: $white;
+  box-shadow: $shadow-sm;
+
+  .bi {
+    font-size: 15px;
+    line-height: 1;
   }
 
-  &.danger {
+  &.is-cancel {
+    width: 40px;
+    height: 40px;
+    left: -16px;
     background: $danger-color;
-    color: $white;
+  }
+
+  &.is-confirm {
+    width: 40px;
+    height: 40px;
+    right: -16px;
+    background: $primary-color;
   }
 }
 
 @media (max-width: $mobile) {
-  .score-dialog {
-    width: 100%;
-    max-height: calc(100dvh - (#{$spacing-sm} * 2));
-    padding: $spacing-md;
-    gap: $spacing-sm;
-  }
-
-  .score-dialog-grid {
-    gap: 10px;
-  }
-
-  .score-option-btn {
-    min-height: 64px;
+  .score-stepper-value {
+    width: 84px;
+    height: 84px;
+    font-size: 40px;
   }
 }
 
-@media (max-width: $mobile) and (orientation: landscape) {
-  .score-dialog-backdrop {
-    align-items: flex-start;
-    padding: 8px;
-  }
-
-  .score-dialog {
-    width: min(100%, 560px);
-    max-width: calc(100vw - 16px);
-    max-height: calc(100dvh - 16px);
-    padding: $spacing-sm;
-    gap: 8px;
-    border-radius: $border-radius-md;
-  }
-
-  .score-dialog-header {
-    .score-dialog-heading-group {
-      gap: 2px;
-    }
-
-    strong {
-      font-size: $font-md;
-      line-height: 1.1;
-    }
-
-    span {
-      font-size: $font-xs;
-    }
-  }
-
-  .score-dialog-close-btn {
-    width: 36px;
-    height: 36px;
-    font-size: $font-md;
-  }
-
-  .score-dialog-grid,
-  .score-dialog-actions {
-    gap: 8px;
-  }
-
-  .score-dialog-btn {
-    padding: 6px $spacing-sm;
-    font-size: $font-sm;
-  }
-
-  .score-option-btn {
-    min-height: 52px;
-    padding: 6px;
-  }
-
-  .score-option-value {
-    font-size: 30px;
-    transform: none;
-  }
-
-  .score-dialog-edge-action {
-    .edge-option {
-      min-height: 48px;
-    }
+@media (prefers-reduced-motion: reduce) {
+  .score-stepper,
+  .score-stepper.is-closing {
+    animation-duration: 1ms;
   }
 }
 

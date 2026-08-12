@@ -164,6 +164,10 @@ export interface TournamentMatchup {
   id: string;
   // Only confirmed matches count toward the official leaderboard.
   confirmed?: boolean;
+  // Code of the round this match is played in.
+  roundId?: string;
+  name?: string;
+  scorecardName?: string;
   sides: MatchupSide[];
 }
 
@@ -171,6 +175,7 @@ export interface TournamentSession {
   id: string;
   name: string;
   format: TournamentMatchupFormat;
+  holes: number;
   matchups: TournamentMatchup[];
 }
 

@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   type FirestoreError,
   getDoc,
@@ -243,8 +244,7 @@ export const loadRound = async (roundId: string): Promise<GameState> => {
   }
 };
 
-export const listRounds = async (): Promise<RoundSummary[]> => {
-  const firestore = ensureFirebase();
+export const listRounds = async (): Promise<RoundSummary[]> => {  const firestore = ensureFirebase();
 
   try {
     const snapshot = await getDocs(collection(firestore, 'rounds'));
@@ -297,6 +297,21 @@ export const subscribeToRound = (
       onError(toUserError(error, 'Lost connection to shared round.'));
     }
   );
+};
+
+export const deleteRound = async (roundId: string): Promise<void> => {
+  const firestore = ensureFirebase();
+  const normalizedId = sanitizeRoundId(roundId);
+
+  if (!normalizedId) {
+    throw new Error('A valid round code is required to delete a round.');
+  }
+
+  try {
+    await deleteDoc(doc(firestore, 'rounds', normalizedId));
+  } catch (error) {
+    throw toUserError(error, 'Failed to delete the round.');
+  }
 };
 
 export const normalizeRoundId = sanitizeRoundId;

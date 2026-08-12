@@ -1,0 +1,67 @@
+// ---------------------------------------------------------------------------
+// Bootstrap theme entry point.
+//
+// Design tokens are fed into Bootstrap's Sass variables here, then Bootstrap is
+// compiled, then our own overrides are layered on top. Import order matters:
+// Bootstrap must be configured before it is compiled.
+//
+// Edit tokens in _tokens.scss, and custom rules in _overrides.scss.
+// ---------------------------------------------------------------------------
+
+@use './tokens' as t;
+
+@use 'bootstrap/scss/bootstrap' with (
+  // Theme colors
+  $primary: t.$brand-primary,
+  $secondary: t.$brand-secondary,
+  $success: t.$brand-success,
+  $danger: t.$brand-danger,
+  $warning: t.$brand-warning,
+  $info: t.$brand-info,
+  $light: t.$brand-canvas,
+  $dark: t.$brand-ink,
+
+  // Adds .btn-accent, .text-accent, .bg-accent alongside the defaults.
+  $theme-colors: (
+    'primary': t.$brand-primary,
+    'secondary': t.$brand-secondary,
+    'success': t.$brand-success,
+    'info': t.$brand-info,
+    'warning': t.$brand-warning,
+    'danger': t.$brand-danger,
+    'light': t.$brand-canvas,
+    'dark': t.$brand-ink,
+    'accent': t.$brand-accent,
+    'tertiary': t.$brand-tertiary
+  ),
+
+  // Page and surfaces
+  $body-bg: t.$brand-canvas,
+  $body-color: t.$brand-ink,
+  $body-secondary-color: t.$brand-muted,
+  $border-color: t.$brand-line,
+
+  // Typography
+  $font-family-base: t.$font-base,
+  $font-family-sans-serif: t.$font-sans,
+  $headings-font-family: t.$font-headings,
+  $font-size-base: t.$font-md,
+  $line-height-base: t.$line-height-base,
+  $headings-font-weight: 700,
+
+  // Shape
+  $border-radius: t.$radius-md,
+  $border-radius-sm: t.$radius-sm,
+  $border-radius-lg: t.$radius-lg,
+
+  // Components
+  $card-bg: t.$brand-surface,
+  $card-border-color: t.$brand-line,
+  $card-border-radius: t.$radius-md,
+  $input-bg: t.$brand-surface,
+  $input-border-color: t.$brand-line,
+  $enable-shadows: false,
+  $enable-gradients: false
+);
+
+@use './overrides';

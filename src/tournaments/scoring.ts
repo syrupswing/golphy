@@ -1,7 +1,9 @@
 import type {
   BuiltInTournamentMatchupFormat,
+  HoleInfo,
   MatchupSide,
   PlayerProfile,
+  Score,
   SessionScoringMode,
   SessionHandicapRule,
   SessionLineupRule,
@@ -12,9 +14,27 @@ import type {
   TournamentSessionFormat,
   TournamentSession,
 } from '../types/index.ts';
+import {
+  allocateStrokesByStrokeIndex,
+  applyRoundRule as handicapRounding,
+  prorateHandicapByHoles,
+} from './handicaps';
 
 export const HOLES_PER_MATCH = 9;
 export const HOLES_PER_GAME = HOLES_PER_MATCH;
+
+// Sessions are built from sets of nine, so a match covers one, two or three of them.
+export const SESSION_HOLE_OPTIONS = [9, 18, 27] as const;
+
+export const normalizeSessionHoleCount = (value: unknown): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return HOLES_PER_MATCH;
+  }
+
+  const nearestSet = Math.round(parsed / HOLES_PER_MATCH) * HOLES_PER_MATCH;
+  return Math.max(HOLES_PER_MATCH, Math.min(27, nearestSet));
+};
 
 // A won nine-hole match is worth two points; a halved match splits them.
 export const POINTS_FOR_WIN = 2;
@@ -283,6 +303,8 @@ export interface MatchupResult {
 interface MatchupResolutionContext {
   playerProfiles?: PlayerProfile[];
   holesInMatch?: number;
+  // Set when side scores already have handicap strokes applied.
+  scoresAreNet?: boolean;
 }
 
 const getHoleScore = (side: MatchupSide | undefined, hole: number): number => {
@@ -290,23 +312,7 @@ const getHoleScore = (side: MatchupSide | undefined, hole: number): number => {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 };
 
-const applyRoundRule = (value: number, rounding: 'nearest' | 'up' | 'down'): number => {
-  if (rounding === 'up') {
-    return Math.ceil(value);
-  }
-
-  if (rounding === 'down') {
-    return Math.floor(value);
-  }
-
-  return Math.round(value);
-};
-
-const prorateHandicapByHoles = (baseHandicap: number, holes: number): number => {
-  const normalizedHoles = Number.isFinite(holes) && holes > 0 ? holes : HOLES_PER_MATCH;
-  const factor = normalizedHoles / 18;
-  return baseHandicap * factor;
-};
+const applyRoundRule = handicapRounding;
 
 const getPlayerHandicap = (
   playerId: string,
@@ -356,7 +362,7 @@ const calculateHandicapAllowances = (
   format: TournamentSessionFormat,
   context: MatchupResolutionContext
 ): { allowances: [number, number]; sideHandicaps: [number | null, number | null] } => {
-  if (!format.useHandicaps || !format.handicapRule) {
+  if (context.scoresAreNet || !format.useHandicaps || !format.handicapRule) {
     return { allowances: [0, 0], sideHandicaps: [null, null] };
   }
 
@@ -393,6 +399,7 @@ export const resolveMatchup = (
 ): MatchupResult => {
   const format = getSessionFormatDefinition(formatId, customFormats);
   const [sideA, sideB] = matchup.sides;
+  const holesInMatch = normalizeSessionHoleCount(context.holesInMatch);
   const handicapMeta = calculateHandicapAllowances(matchup, format, context);
   const useHandicapByHole = format.resultMode === 'holes';
   const remainingAllowances: [number, number] = [
@@ -403,7 +410,7 @@ export const resolveMatchup = (
   const totals: [number, number] = [0, 0];
   let holesPlayed = 0;
 
-  for (let hole = 0; hole < HOLES_PER_MATCH; hole += 1) {
+  for (let hole = 0; hole < holesInMatch; hole += 1) {
     const scoreA = getHoleScore(sideA, hole);
     const scoreB = getHoleScore(sideB, hole);
 
@@ -430,7 +437,7 @@ export const resolveMatchup = (
     else if (adjustedB < adjustedA) holesWon[1] += 1;
   }
 
-  const isComplete = holesPlayed === HOLES_PER_MATCH;
+  const isComplete = holesPlayed === holesInMatch;
   const netTotals: [number, number] = [
     totals[0] - handicapMeta.allowances[0],
     totals[1] - handicapMeta.allowances[1],
@@ -460,13 +467,22 @@ export const resolveMatchup = (
   const isTie = metricA === metricB;
   const winningSideIndex = isTie ? null : metricA > metricB ? 0 : 1;
 
+  const holeLead = Math.abs(holesWon[0] - holesWon[1]);
+  const holesRemaining = holesInMatch - holesPlayed;
+
+  const matchPlaySummary = isTie
+    ? `All square thru ${holesPlayed}`
+    : holeLead > holesRemaining && holesRemaining > 0
+      ? `Wins ${holeLead - holesRemaining} & ${holesRemaining}`
+      : isComplete
+        ? `Wins ${holeLead} up`
+        : `${holeLead} up thru ${holesPlayed}`;
+
   const summary = useNetTotals
     ? handicapMeta.allowances[0] || handicapMeta.allowances[1]
       ? `${totals[0]} (${netTotals[0]}) v ${totals[1]} (${netTotals[1]})`
       : `${totals[0]} v ${totals[1]}`
-    : isTie
-      ? `All square through ${holesPlayed}`
-      : `${Math.abs(holesWon[0] - holesWon[1])} up through ${holesPlayed}`;
+    : matchPlaySummary;
 
   return {
     isComplete,
@@ -491,32 +507,146 @@ const createLocalId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
-export const createEmptyMatchup = (): TournamentMatchup => ({
-  id: createLocalId(),
-  confirmed: false,
-  sides: [
-    { entryId: '', playerIds: [], scores: Array(HOLES_PER_MATCH).fill(0) },
-    { entryId: '', playerIds: [], scores: Array(HOLES_PER_MATCH).fill(0) },
-  ],
-});
+export const createEmptyMatchup = (holes: number = HOLES_PER_MATCH): TournamentMatchup => {
+  const holeCount = normalizeSessionHoleCount(holes);
+
+  return {
+    id: createLocalId(),
+    confirmed: false,
+    sides: [
+      { entryId: '', playerIds: [], scores: Array(holeCount).fill(0) },
+      { entryId: '', playerIds: [], scores: Array(holeCount).fill(0) },
+    ],
+  };
+};
 
 export const createEmptySession = (existingCount: number): TournamentSession => ({
   id: createLocalId(),
   name: `Session ${existingCount + 1}`,
   format: 'singles',
+  holes: HOLES_PER_MATCH,
   matchups: [],
 });
 
 export const createSessionWithConfig = (
   existingCount: number,
   name: string,
-  format: TournamentMatchupFormat
+  format: TournamentMatchupFormat,
+  holes: number = HOLES_PER_MATCH
 ): TournamentSession => ({
   id: createLocalId(),
   name: name.trim() || `Session ${existingCount + 1}`,
   format,
+  holes: normalizeSessionHoleCount(holes),
   matchups: [],
 });
+
+// A side plays one result per hole: the best ball for own-ball formats, the shared ball otherwise.
+export const buildSideScoresFromRound = (
+  playerIds: string[],
+  scores: Score[],
+  holes: number
+): number[] => {
+  const holeCount = normalizeSessionHoleCount(holes);
+
+  return Array.from({ length: holeCount }, (_, index) => {
+    const strokes = scores
+      .filter((score) => score.hole === index + 1 && playerIds.includes(score.playerId))
+      .map((score) => score.strokes)
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    return strokes.length ? Math.min(...strokes) : 0;
+  });
+};
+
+export interface MatchRoundScores {
+  sideScores: [number[], number[]];
+  sideHandicaps: [number | null, number | null];
+  allowances: [number, number];
+}
+
+const resolveSideHandicap = (
+  playerIds: string[],
+  format: TournamentSessionFormat,
+  handicapOf: (playerId: string) => number | null,
+  holes: number
+): number | null => {
+  const rule = format.handicapRule;
+
+  if (rule?.type === 'scramble-pair-percentage') {
+    const handicaps = playerIds
+      .map(handicapOf)
+      .filter((value): value is number => value !== null)
+      .sort((left, right) => left - right);
+
+    if (handicaps.length < 2) {
+      return null;
+    }
+
+    const [low, high] = handicaps;
+    const raw = low * rule.lowPercentage + high * rule.highPercentage;
+    const effective = rule.prorateByHoles !== false ? prorateHandicapByHoles(raw, holes) : raw;
+    return handicapRounding(effective, rule.rounding);
+  }
+
+  // Head-to-head singles play off the difference in playing handicaps.
+  if (playerIds.length === 1) {
+    const handicap = handicapOf(playerIds[0]);
+    return handicap === null ? null : Math.round(prorateHandicapByHoles(handicap, holes));
+  }
+
+  return null;
+};
+
+// Mirrors the scorecard: strokes come off the hardest holes, and only for the
+// formats the scorecard itself strokes (head-to-head singles and paired scrambles).
+export const buildMatchRoundScores = (
+  matchup: TournamentMatchup,
+  format: TournamentSessionFormat,
+  holes: number,
+  roundScores: Score[],
+  holeDetails: HoleInfo[] | undefined,
+  handicapOf: (playerId: string) => number | null
+): MatchRoundScores => {
+  const holeCount = normalizeSessionHoleCount(holes);
+  const grossScores: [number[], number[]] = [
+    buildSideScoresFromRound(matchup.sides[0]?.playerIds ?? [], roundScores, holeCount),
+    buildSideScoresFromRound(matchup.sides[1]?.playerIds ?? [], roundScores, holeCount),
+  ];
+
+  const sideHandicaps: [number | null, number | null] = format.useHandicaps
+    ? [
+        resolveSideHandicap(matchup.sides[0]?.playerIds ?? [], format, handicapOf, holeCount),
+        resolveSideHandicap(matchup.sides[1]?.playerIds ?? [], format, handicapOf, holeCount),
+      ]
+    : [null, null];
+
+  const allowances: [number, number] = [0, 0];
+
+  if (sideHandicaps[0] !== null && sideHandicaps[1] !== null) {
+    const difference = sideHandicaps[0] - sideHandicaps[1];
+    if (difference > 0) {
+      allowances[0] = difference;
+    } else if (difference < 0) {
+      allowances[1] = -difference;
+    }
+  }
+
+  const byHole: [Record<number, number>, Record<number, number>] = [
+    allocateStrokesByStrokeIndex(allowances[0], holeDetails, holeCount),
+    allocateStrokesByStrokeIndex(allowances[1], holeDetails, holeCount),
+  ];
+
+  return {
+    sideScores: [0, 1].map((sideIndex) =>
+      grossScores[sideIndex].map((gross, holeIndex) =>
+        gross > 0 ? gross - (byHole[sideIndex][holeIndex + 1] ?? 0) : 0
+      )
+    ) as [number[], number[]],
+    sideHandicaps,
+    allowances,
+  };
+};
 
 // Backward-compatible alias while callers migrate terminology.
 export const createEmptyRound = createEmptySession;
@@ -534,7 +664,7 @@ export interface StandingRow {
 
 export const calculateStandings = (
   tournament: Tournament,
-  options: { playerProfiles?: PlayerProfile[] } = {}
+  options: { playerProfiles?: PlayerProfile[]; scoresAreNet?: boolean } = {}
 ): StandingRow[] => {
   const rows = new Map<string, StandingRow>();
 
@@ -566,7 +696,7 @@ export const calculateStandings = (
         matchup,
         session.format,
         tournament.sessionFormats ?? [],
-        { playerProfiles: options.playerProfiles, holesInMatch: HOLES_PER_MATCH }
+        { playerProfiles: options.playerProfiles, holesInMatch: session.holes, scoresAreNet: options.scoresAreNet }
       );
       if (result.holesPlayed === 0) {
         return;

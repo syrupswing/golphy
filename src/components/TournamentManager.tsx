@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   PlayerProfile,
   PlayerTier,
@@ -6,18 +6,14 @@ import type {
   Tournament,
   TournamentEntry,
   TournamentFormat,
-  TournamentSessionFormat,
   TournamentSession,
 } from '../types/index.ts';
 import {
   makeEntryId,
   REQUIRED_TIER_COUNTS,
-  saveTournamentSessions,
-  subscribeToTournament,
   TEAM_SIZE,
 } from '../firebase/tournaments';
 import type { TournamentInput } from '../firebase/tournaments';
-import TournamentSessionsEditor from './TournamentRounds';
 import './TournamentManager.scss';
 
 interface TournamentManagerProps {
@@ -25,10 +21,8 @@ interface TournamentManagerProps {
   tournaments: Tournament[];
   initialTournamentId?: string;
   onCancel?: () => void;
-  sessionFormats?: TournamentSessionFormat[];
   playerProfiles: PlayerProfile[];
   isSaving: boolean;
-  clientId: string;
   onCreate: (input: TournamentInput) => Promise<boolean>;
   onUpdate: (id: string, input: TournamentInput) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
@@ -49,10 +43,8 @@ export default function TournamentManager({
   tournaments,
   initialTournamentId,
   onCancel,
-  sessionFormats = [],
   playerProfiles,
   isSaving,
-  clientId,
   onCreate,
   onUpdate,
   onDelete,
@@ -64,9 +56,6 @@ export default function TournamentManager({
   const [entries, setEntries] = useState<TournamentEntry[]>([makeEmptyEntry()]);
   const [sessions, setSessions] = useState<TournamentSession[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(mode === 'add');
-  const [scoreSaveState, setScoreSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  // Sessions arriving from the subscription must not be echoed straight back as a write.
-  const skipNextAutoSaveRef = useRef(true);
 
   const getHandicap = (playerId: string): number =>
     playerProfiles.find((profile) => profile.id === playerId)?.handicap ?? Number.MAX_SAFE_INTEGER;
@@ -87,29 +76,6 @@ export default function TournamentManager({
     entry.playerIds.filter((playerId) => entry.playerTiers?.[playerId] === tier).length;
 
   useEffect(() => {
-    if (!editingId) {
-      return;
-    }
-
-    const unsubscribe = subscribeToTournament(
-      editingId,
-      (tournament, updatedBy) => {
-        if (updatedBy === clientId) {
-          return;
-        }
-
-        skipNextAutoSaveRef.current = true;
-        setSessions(tournament.sessions ?? tournament.rounds ?? []);
-      },
-      () => {
-        // A dropped subscription should not block local scoring.
-      }
-    );
-
-    return unsubscribe;
-  }, [editingId, clientId]);
-
-  useEffect(() => {
     if (mode !== 'edit' || editingId || !initialTournamentId) {
       return;
     }
@@ -121,26 +87,6 @@ export default function TournamentManager({
 
     openTournamentForEditing(initialTournament);
   }, [mode, editingId, initialTournamentId, tournaments]);
-
-  useEffect(() => {
-    if (!editingId) {
-      return;
-    }
-
-    if (skipNextAutoSaveRef.current) {
-      skipNextAutoSaveRef.current = false;
-      return;
-    }
-
-    setScoreSaveState('saving');
-    const timeout = window.setTimeout(() => {
-      saveTournamentSessions(editingId, sessions, clientId)
-        .then(() => setScoreSaveState('saved'))
-        .catch(() => setScoreSaveState('error'));
-    }, 500);
-
-    return () => window.clearTimeout(timeout);
-  }, [sessions, editingId, clientId]);
 
   // Manual mode keeps existing picks and only slots newcomers into whichever tier has room.
   const resolveTiers = (
@@ -172,7 +118,6 @@ export default function TournamentManager({
   };
 
   const resetForm = () => {
-    skipNextAutoSaveRef.current = true;
     setEditingId(null);
     setName('');
     setFormat('individual');
@@ -183,8 +128,6 @@ export default function TournamentManager({
   };
 
   const openTournamentForEditing = (tournament: Tournament) => {
-    skipNextAutoSaveRef.current = true;
-    setScoreSaveState('idle');
     setEditingId(tournament.id);
     setName(tournament.name);
     setFormat(tournament.format);
@@ -555,25 +498,9 @@ export default function TournamentManager({
             </button>
           </div>
 
-          <TournamentSessionsEditor
-            entries={entries}
-            sessions={sessions}
-            sessionFormats={sessionFormats}
-            playerProfiles={playerProfiles}
-            onChange={setSessions}
-          />
-
-          {editingId && (
-            <p className={`tournament-save-state is-${scoreSaveState}`}>
-              {scoreSaveState === 'saving'
-                ? 'Saving scores...'
-                : scoreSaveState === 'saved'
-                  ? 'Scores saved'
-                  : scoreSaveState === 'error'
-                    ? 'Could not save scores. Check your connection.'
-                    : 'Scores save automatically'}
-            </p>
-          )}
+          <p className="tournament-empty">
+            Session setup is temporarily hidden while scoring flows are being rebuilt.
+          </p>
 
           <div className="tournament-actions">
             <button
