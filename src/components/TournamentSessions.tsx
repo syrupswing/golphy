@@ -370,7 +370,8 @@ export default function TournamentSessions({
                         className="session-btn is-primary"
                         onClick={() => onOpenRound(matchup.roundId as string)}
                       >
-                        Open round
+                        <i className="bi bi-grid-3x2" aria-hidden="true" />
+                        Open scorecard
                       </button>
                     )}
                     <label className="session-confirm">

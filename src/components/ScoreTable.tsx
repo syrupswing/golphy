@@ -8,6 +8,7 @@ interface ScoreTableProps {
   totalHoles: number;
   parValues: number[];
   roundTitle?: string;
+  matchInfo?: React.ReactNode;
   tournamentName?: string;
   onTournamentLinkClick?: () => void;
   holeDetails?: HoleInfo[];
@@ -148,7 +149,7 @@ function MatchChevron({ direction }: { direction: 'up' | 'down' }) {
   );
 }
 
-export default function ScoreTable({ players, scores, totalHoles, parValues, roundTitle, tournamentName, onTournamentLinkClick, holeDetails, courseName, setLabels, matchup, onScoreUpdate }: ScoreTableProps) {
+export default function ScoreTable({ players, scores, totalHoles, parValues, roundTitle, matchInfo, tournamentName, onTournamentLinkClick, holeDetails, courseName, setLabels, matchup, onScoreUpdate }: ScoreTableProps) {
   const [hasHorizontalScrollOffset, setHasHorizontalScrollOffset] = React.useState(false);
   const [playerColumnWidth, setPlayerColumnWidth] = React.useState(() => {
     try {
@@ -1022,60 +1023,12 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
               title="Back to tournament"
             >
               <i className="bi bi-chevron-left" aria-hidden="true" />
+              {tournamentName}
             </button>
           )}
-          <p className="round-tournament-name">{tournamentName}</p>
         </div>
       )}
       {roundTitle && <h2 className="course-name-heading">{roundTitle}</h2>}
-      {scrambleSideStrokes && matchup?.teams?.length && (
-        <details className="matchup-handicap-disclosure">
-          <summary>
-            Team handicap: {scrambleSideStrokes.sideHandicaps[0]} vs {scrambleSideStrokes.sideHandicaps[1]}.{' '}
-            {(() => {
-              const side0Total = Object.values(scrambleSideStrokes.bySide[0]).reduce((sum, value) => sum + value, 0);
-              const side1Total = Object.values(scrambleSideStrokes.bySide[1]).reduce((sum, value) => sum + value, 0);
-
-              if (side0Total > 0) {
-                const teamName = matchup.teams[0]?.name || 'Top side';
-                return `${teamName} receives ${side0Total} stroke${side0Total === 1 ? '' : 's'}.`;
-              }
-
-              if (side1Total > 0) {
-                const teamName = matchup.teams[1]?.name || 'Bottom side';
-                return `${teamName} receives ${side1Total} stroke${side1Total === 1 ? '' : 's'}.`;
-              }
-
-              return 'No strokes given.';
-            })()}
-          </summary>
-          <div className="matchup-handicap-breakdown">
-            {([0, 1] as const).map((sideIndex) => {
-              const detail = scrambleSideStrokes.details[sideIndex];
-              const teamName = matchup.teams[sideIndex]?.name || `Side ${sideIndex + 1}`;
-
-              return (
-                <div key={teamName} className="matchup-handicap-side-detail">
-                  <strong>{teamName}</strong>
-                  <span>
-                    Low handicap player: {detail.playerNames[0]} ({detail.playerHandicaps[0]}) x {matchup.handicapRule?.lowPercentage ?? 0}
-                    {' '}= {detail.weightedLow.toFixed(2)}
-                  </span>
-                  <span>
-                    High handicap player: {detail.playerNames[1]} ({detail.playerHandicaps[1]}) x {matchup.handicapRule?.highPercentage ?? 0}
-                    {' '}= {detail.weightedHigh.toFixed(2)}
-                  </span>
-                  <span>Raw team handicap: {detail.rawTeamHandicap.toFixed(2)}</span>
-                  {matchup.handicapRule?.prorateByHoles !== false && (
-                    <span>Prorated for {totalHoles} holes: {detail.effectiveTeamHandicap.toFixed(2)}</span>
-                  )}
-                  <span>Rounded team handicap: {scrambleSideStrokes.sideHandicaps[sideIndex]}</span>
-                </div>
-              );
-            })}
-          </div>
-        </details>
-      )}
       <div
         className={`table-wrapper${hasHorizontalScrollOffset ? ' is-scrolled-x' : ''}${isResizingPlayerColumn ? ' is-resizing-col' : ''}`}
         onScroll={handleTableScroll}
@@ -1262,6 +1215,62 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
           </tbody>
         </table>
       </div>
+      {(matchInfo || (scrambleSideStrokes && matchup?.teams?.length)) && (
+        <details className="matchup-handicap-disclosure">
+          <summary>Match info</summary>
+          <div className="match-info-content">
+            {matchInfo}
+            {scrambleSideStrokes && matchup?.teams?.length && (
+              <>
+                <p className="match-info-line">
+                  Team handicap: {scrambleSideStrokes.sideHandicaps[0]} vs {scrambleSideStrokes.sideHandicaps[1]}.{' '}
+                  {(() => {
+                    const side0Total = Object.values(scrambleSideStrokes.bySide[0]).reduce((sum, value) => sum + value, 0);
+                    const side1Total = Object.values(scrambleSideStrokes.bySide[1]).reduce((sum, value) => sum + value, 0);
+
+                    if (side0Total > 0) {
+                      const teamName = matchup.teams[0]?.name || 'Top side';
+                      return `${teamName} receives ${side0Total} stroke${side0Total === 1 ? '' : 's'}.`;
+                    }
+
+                    if (side1Total > 0) {
+                      const teamName = matchup.teams[1]?.name || 'Bottom side';
+                      return `${teamName} receives ${side1Total} stroke${side1Total === 1 ? '' : 's'}.`;
+                    }
+
+                    return 'No strokes given.';
+                  })()}
+                </p>
+                <div className="matchup-handicap-breakdown">
+                  {([0, 1] as const).map((sideIndex) => {
+                    const detail = scrambleSideStrokes.details[sideIndex];
+                    const teamName = matchup.teams[sideIndex]?.name || `Side ${sideIndex + 1}`;
+
+                    return (
+                      <div key={teamName} className="matchup-handicap-side-detail">
+                        <strong>{teamName}</strong>
+                        <span>
+                          Low handicap player: {detail.playerNames[0]} ({detail.playerHandicaps[0]}) x {matchup.handicapRule?.lowPercentage ?? 0}
+                          {' '}= {detail.weightedLow.toFixed(2)}
+                        </span>
+                        <span>
+                          High handicap player: {detail.playerNames[1]} ({detail.playerHandicaps[1]}) x {matchup.handicapRule?.highPercentage ?? 0}
+                          {' '}= {detail.weightedHigh.toFixed(2)}
+                        </span>
+                        <span>Raw team handicap: {detail.rawTeamHandicap.toFixed(2)}</span>
+                        {matchup.handicapRule?.prorateByHoles !== false && (
+                          <span>Prorated for {totalHoles} holes: {detail.effectiveTeamHandicap.toFixed(2)}</span>
+                        )}
+                        <span>Rounded team handicap: {scrambleSideStrokes.sideHandicaps[sideIndex]}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </details>
+      )}
       {activeScoreDialog && (
         <>
           <div

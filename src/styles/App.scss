@@ -961,7 +961,7 @@
 }
 
 .scorecard-logo-btn,
-.round-info-btn {
+.leaderboard-quick-link-btn {
   pointer-events: auto;
   width: 44px;
   height: 44px;
@@ -989,188 +989,16 @@
 
 .scorecard-logo-btn {
   border-top-left-radius: 18px;
-  overflow: hidden;
-}
-
-.scorecard-logo {
-  width: 32px;
-  height: 32px;
-  object-fit: cover;
-  object-position: left center;
-}
-
-.round-info-wrap {
-  position: relative;
-}
-
-.round-info-btn {
-  border-top-right-radius: 18px;
   color: $primary-color;
   font-size: $font-lg;
-  font-weight: 700;
   line-height: 1;
 }
 
-.round-info-popover {
-  pointer-events: auto;
-  position: absolute;
-  top: calc(100% + #{$spacing-xs});
-  right: 0;
-  width: min(88vw, 320px);
-  max-height: min(76dvh, 560px);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: $spacing-md;
-  border-radius: $border-radius-md;
-  background: rgba($white, 0.98);
-  border: 1px solid color.adjust($light-color, $lightness: -8%);
-  box-shadow: $shadow-md;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-
-  strong {
-    font-size: $font-md;
-    color: $dark-color;
-    margin-bottom: 2px;
-  }
-
-  span {
-    font-size: $font-sm;
-    line-height: 1.3;
-    color: color.adjust($dark-color, $lightness: 18%);
-    word-break: break-word;
-  }
-
-  .sync-error {
-    margin-top: 2px;
-    color: $danger-color;
-    font-size: $font-sm;
-    font-weight: 600;
-  }
-
-  .round-match-delete-btn {
-    margin-top: $spacing-xs;
-    padding: $spacing-xs $spacing-sm;
-    border-radius: $border-radius-sm;
-    background: transparent;
-    border: 1px solid color.adjust($danger-color, $lightness: 24%);
-    color: $danger-color;
-    font-size: $font-sm;
-    font-weight: 600;
-
-    &:hover {
-      background: $danger-color;
-      border-color: $danger-color;
-      color: $white;
-    }
-  }
-
-  .round-player-management {
-    margin-top: $spacing-xs;
-    padding-top: $spacing-xs;
-    border-top: 1px solid color.adjust($light-color, $lightness: -6%);
-    display: flex;
-    flex-direction: column;
-    gap: $spacing-xs;
-
-    strong {
-      font-size: $font-sm;
-      color: $dark-color;
-    }
-  }
-
-  .round-player-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 140px;
-    overflow-y: auto;
-  }
-
-  .round-player-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: $spacing-sm;
-    padding: 8px 10px;
-    border-radius: $border-radius-sm;
-    background: color.adjust($light-color, $lightness: -1%);
-
-    span {
-      flex: 1;
-      font-size: $font-xs;
-      color: $dark-color;
-      word-break: break-word;
-    }
-  }
-
-  .round-player-add-btn,
-  .round-player-remove-btn {
-    border-radius: $border-radius-sm;
-    font-size: $font-xs;
-    font-weight: 600;
-    padding: 6px 10px;
-    flex-shrink: 0;
-  }
-
-  .round-player-add-btn {
-    background: $secondary-color;
-    color: $white;
-
-    &:hover {
-      background: color.adjust($secondary-color, $lightness: -8%);
-    }
-
-    &:disabled {
-      background: $gray;
-      cursor: not-allowed;
-    }
-  }
-
-  .round-player-remove-btn {
-    background: $danger-color;
-    color: $white;
-
-    &:hover {
-      background: color.adjust($danger-color, $lightness: -10%);
-    }
-  }
-
-  .round-player-grid {
-    margin-top: $spacing-xs;
-
-    input {
-      padding: 10px 12px;
-      font-size: $font-sm;
-    }
-  }
-
-  .add-player-form.compact {
-    margin-bottom: $spacing-sm;
-
-    button {
-      padding: 10px 12px;
-      font-size: $font-sm;
-    }
-  }
-
-  .collapse-player-btn {
-    margin-bottom: 0;
-  }
-}
-
-@media (max-width: $mobile) and (orientation: landscape) {
-  .round-info-popover {
-    width: min(92vw, 360px);
-    max-height: calc(100dvh - 72px);
-    padding: $spacing-sm;
-    gap: $spacing-xs;
-  }
-
-  .round-info-popover .round-player-list {
-    max-height: min(32dvh, 120px);
-  }
+.leaderboard-quick-link-btn {
+  border-top-right-radius: 18px;
+  color: $primary-color;
+  font-size: $font-lg;
+  line-height: 1;
 }
 
 .share-notice {

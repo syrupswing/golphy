@@ -43,6 +43,14 @@
   color: $dark-color;
   font-size: $font-sm;
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  .bi {
+    font-size: $font-sm;
+    line-height: 1;
+  }
 
   &.is-primary {
     background: $primary-color;

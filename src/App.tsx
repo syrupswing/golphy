@@ -28,7 +28,6 @@ import {
 import { isFirebaseConfigured } from './firebase/config'
 import {
   createRound,
-  deleteRound,
   loadRound,
   normalizeRoundId,
   listRounds,
@@ -40,9 +39,7 @@ import { createPlayer, deletePlayer, listPlayers, updatePlayer } from './firebas
 import {
   createTournament,
   deleteTournament,
-  getTournament,
   listTournaments,
-  saveTournamentSessions,
   updateTournament,
 } from './firebase/tournaments'
 import {
@@ -52,6 +49,7 @@ import {
 import type { TournamentInput } from './firebase/tournaments'
 import './styles/App.scss'
 import golphyBanner from './assets/golphy-by-banner.svg'
+import leaderboardIcon from './assets/leaderboard-icon.svg'
 
 const PLAYER_COLORS = [
   '#e74c3c', '#3498db', '#2ecc71', '#f39c12', 
@@ -166,7 +164,6 @@ function App() {
   const [formatMessage, setFormatMessage] = useState('');
   const [formatError, setFormatError] = useState('');
   const [homeCourseSelection, setHomeCourseSelection] = useState<Scorecard | null>(null);
-  const [showRoundInfoPopover, setShowRoundInfoPopover] = useState(false);
   const [availableRounds, setAvailableRounds] = useState<Array<{
     id: string;
     alias?: string;
@@ -179,8 +176,6 @@ function App() {
   const clientId = useMemo(() => createClientId(), []);
   const skipNextSyncRef = useRef(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
-  const roundInfoPopoverRef = useRef<HTMLDivElement | null>(null);
-  const roundInfoButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const buildDefaultPars = (holes: number) => Array.from({ length: holes }, () => DEFAULT_PAR);
   const allSessionFormats = getTournamentSessionFormats(globalSessionFormats);
@@ -337,38 +332,6 @@ function App() {
 
     return () => window.clearTimeout(timeoutId);
   }, [toastMessage]);
-
-  useEffect(() => {
-    if (!showRoundInfoPopover) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (roundInfoPopoverRef.current?.contains(target)) {
-        return;
-      }
-      if (roundInfoButtonRef.current?.contains(target)) {
-        return;
-      }
-
-      setShowRoundInfoPopover(false);
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setShowRoundInfoPopover(false);
-      }
-    };
-
-    window.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('keydown', handleEscape);
-
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('keydown', handleEscape);
-    };
-  }, [showRoundInfoPopover]);
 
   const refreshPlayerProfiles = async () => {
     if (!isFirebaseConfigured) {
@@ -1383,7 +1346,6 @@ function App() {
   const goHome = () => {
     setView('home');
     setTournamentViewMode('dashboard');
-    setShowRoundInfoPopover(false);
     setShowRoundPlayerForm(false);
     setShowRoundNewPlayerForm(false);
     setShowEditPlayerForm(false);
@@ -1433,44 +1395,6 @@ function App() {
     setHomeStep('choose');
     setNewRoundStep('course');
     setView('home');
-    setShowRoundInfoPopover(false);
-  };
-
-  const deleteTournamentMatch = async () => {
-    if (!activeRoundTournamentId || !sharedRoundId) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      'Delete this match? The round and its scores are removed from the tournament.'
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    const tournamentId = activeRoundTournamentId;
-    const roundId = sharedRoundId;
-
-    try {
-      const tournament = await getTournament(tournamentId);
-
-      if (tournament) {
-        const nextSessions = (tournament.sessions ?? tournament.rounds ?? []).map((session) => ({
-          ...session,
-          matchups: session.matchups.filter((matchup) => matchup.roundId !== roundId),
-        }));
-
-        await saveTournamentSessions(tournamentId, nextSessions, clientId);
-      }
-
-      await deleteRound(roundId);
-      setShowRoundInfoPopover(false);
-      endRound();
-      openTournamentDashboard(tournamentId);
-    } catch (error) {
-      setSyncError(error instanceof Error ? error.message : 'Could not delete the match.');
-    }
   };
 
   const createSharedRound = async () => {
@@ -2711,184 +2635,32 @@ function App() {
       ? tournaments.find((tournament) => tournament.id === activeRoundTournamentId) ?? null
       : null;
 
+  const matchInfoContent = (
+    <div className="round-match-info">
+      <span><strong>Course:</strong> {liveCourseName || 'Custom course'}</span>
+      <span><strong>Holes:</strong> {gameState.totalHoles} · <strong>Sets:</strong> {playedSetSummary}</span>
+      <span><strong>Players:</strong> {playersIncluded}</span>
+      <span><strong>Match type:</strong> {matchupLabel}</span>
+      {syncError && <span className="sync-error">Sync issue: {syncError}</span>}
+    </div>
+  );
+
   return (
     <div className="app">
       {toastMessage && <div className="toast-notice">{toastMessage}</div>}
       <div className="scorecard-nav" aria-label="Scorecard navigation">
         <button type="button" onClick={goHome} className="scorecard-logo-btn" aria-label="Return to home">
-          <img src={golphyBanner} width="82" alt="Golphy logo" className="scorecard-logo" />
+          <i className="bi bi-house" aria-hidden="true" />
         </button>
 
-        <div className="round-info-wrap">
-          <button
-            ref={roundInfoButtonRef}
-            type="button"
-            className="round-info-btn"
-            aria-label="Show round info"
-            aria-expanded={showRoundInfoPopover}
-            aria-controls="round-info-popover"
-            onClick={() => setShowRoundInfoPopover((prev) => !prev)}
-          >
-            <span aria-hidden="true">i</span>
-          </button>
-
-          {showRoundInfoPopover && (
-            <div
-              id="round-info-popover"
-              ref={roundInfoPopoverRef}
-              className="round-info-popover"
-              role="dialog"
-              aria-label="Round details"
-            >
-              <strong>{roundTitle}</strong>
-              <span>Course: {liveCourseName || 'Custom course'}</span>
-              <span>Holes: {gameState.totalHoles} · Sets: {playedSetSummary}</span>
-              <span>Players: {playersIncluded}</span>
-              <span>Match type: {matchupLabel}</span>
-              <div className="round-player-management">
-                <strong>Manage players</strong>
-                {gameState.players.length > 0 && (
-                  <div className="round-player-list">
-                    {resolvedPlayers.map((player) => (
-                      <div key={player.id} className="round-player-item">
-                        <span>{player.name}</span>
-                        <button
-                          type="button"
-                          className="round-player-remove-btn"
-                          onClick={() => {
-                            const removed = removePlayer(player.id);
-                            if (removed) {
-                              setShowRoundInfoPopover(false);
-                            }
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {!showRoundPlayerForm ? (
-                  <button
-                    type="button"
-                    className="round-player-add-btn"
-                    onClick={openRoundPlayerPicker}
-                    disabled={gameState.players.length >= maxRoundPlayers}
-                  >
-                    Add player
-                  </button>
-                ) : (
-                  <>
-                    <div className="round-player-list">
-                      {isLoadingPlayerProfiles ? (
-                        <span>Loading players...</span>
-                      ) : playerProfiles.filter((profile) => !gameState.players.some((player) => player.id === profile.id)).length === 0 ? (
-                        <span>No available players to add.</span>
-                      ) : (
-                        playerProfiles
-                          .filter((profile) => !gameState.players.some((player) => player.id === profile.id))
-                          .map((profile) => (
-                            <div key={profile.id} className="round-player-item">
-                              <span>{getRoundPlayerDisplayName(profile)}</span>
-                              <button
-                                type="button"
-                                className="round-player-add-btn"
-                                onClick={() => addExistingPlayerToRound(profile)}
-                              >
-                                Add
-                              </button>
-                            </div>
-                          ))
-                      )}
-                    </div>
-
-                    {!showRoundNewPlayerForm ? (
-                      <button
-                        type="button"
-                        className="round-player-add-btn"
-                        onClick={() => setShowRoundNewPlayerForm(true)}
-                      >
-                        Create new player
-                      </button>
-                    ) : (
-                      <>
-                        <div className="player-profile-grid round-player-grid">
-                          <input
-                            type="text"
-                            value={newPlayerFirstName}
-                            onChange={(e) => setNewPlayerFirstName(e.target.value)}
-                            placeholder="First name"
-                            maxLength={30}
-                          />
-                          <input
-                            type="text"
-                            value={newPlayerLastName}
-                            onChange={(e) => setNewPlayerLastName(e.target.value)}
-                            placeholder="Last name"
-                            maxLength={30}
-                          />
-                          <input
-                            type="text"
-                            value={newPlayerNickname}
-                            onChange={(e) => setNewPlayerNickname(e.target.value)}
-                            placeholder="Nickname (optional)"
-                            maxLength={20}
-                          />
-                          <div className="field-with-label">
-                            <label htmlFor="popover-round-player-handicap">Handicap</label>
-                            <input
-                              id="popover-round-player-handicap"
-                              type="number"
-                              inputMode="decimal"
-                              value={newPlayerHandicap}
-                              onChange={(e) => setNewPlayerHandicap(e.target.value)}
-                              placeholder="e.g. 12.4"
-                              min={-10}
-                              max={54}
-                            />
-                          </div>
-                        </div>
-                        <div className="add-player-form compact">
-                          <button
-                            type="button"
-                            onClick={handleCreatePlayerAndAdd}
-                            disabled={isSavingPlayer || !newPlayerFirstName.trim() || !newPlayerLastName.trim()}
-                          >
-                            {isSavingPlayer ? 'Saving player...' : 'Create and add'}
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          className="collapse-player-btn"
-                          onClick={() => setShowRoundNewPlayerForm(false)}
-                        >
-                          Cancel new player
-                        </button>
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      className="collapse-player-btn"
-                      onClick={closeRoundPlayerPicker}
-                    >
-                      Cancel
-                    </button>
-                  </>
-                )}
-              </div>
-              {activeRoundTournamentId && sharedRoundId && (
-                <button
-                  type="button"
-                  className="round-match-delete-btn"
-                  onClick={() => void deleteTournamentMatch()}
-                >
-                  Delete match
-                </button>
-              )}
-              {syncError && <span className="sync-error">Sync issue: {syncError}</span>}
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          className="leaderboard-quick-link-btn"
+          aria-label="View leaderboard"
+          onClick={() => setToastMessage('Leaderboard view coming soon.')}
+        >
+          <img src={leaderboardIcon} width="24" alt="" aria-hidden="true" />
+        </button>
       </div>
 
       <ScoreTable
@@ -2897,6 +2669,7 @@ function App() {
         totalHoles={gameState.totalHoles}
         parValues={gameState.parValues ?? buildDefaultPars(gameState.totalHoles)}
         roundTitle={roundTitle}
+        matchInfo={matchInfoContent}
         tournamentName={activeRoundTournament?.name}
         onTournamentLinkClick={
           activeRoundTournamentId
