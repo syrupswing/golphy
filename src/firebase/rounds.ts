@@ -26,6 +26,7 @@ interface RoundDocument {
   scorecardId?: string;
   scorecardName?: string;
   playedSetLabels?: string[];
+  useHandicaps?: boolean;
   matchup?: MatchupConfig | null;
   createdBy: string;
   updatedBy: string;
@@ -68,6 +69,7 @@ const toRoundDocument = (state: GameState, clientId: string): RoundDocument => (
   scorecardId: state.scorecardId ?? '',
   scorecardName: state.scorecardName ?? '',
   playedSetLabels: state.playedSetLabels ?? [],
+  useHandicaps: state.useHandicaps ?? false,
   matchup: state.matchup ?? null,
   createdBy: clientId,
   updatedBy: clientId,
@@ -85,6 +87,7 @@ const parseRoundDocument = (data: RoundDocument): GameState => ({
   scorecardId: data.scorecardId || undefined,
   scorecardName: data.scorecardName || undefined,
   playedSetLabels: data.playedSetLabels?.length ? data.playedSetLabels : undefined,
+  useHandicaps: data.useHandicaps ?? false,
   matchup: data.matchup ?? undefined,
 });
 
@@ -211,6 +214,7 @@ export const updateRound = async (
       scorecardId: state.scorecardId ?? '',
       scorecardName: state.scorecardName ?? '',
       playedSetLabels: state.playedSetLabels ?? [],
+      useHandicaps: state.useHandicaps ?? false,
       matchup: state.matchup ?? null,
       updatedBy: clientId,
       updatedAt: serverTimestamp(),

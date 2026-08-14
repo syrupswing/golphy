@@ -23,6 +23,7 @@ import {
   getSessionFormatLabel,
   getSessionFormatPlayerCount,
   getTournamentSessionFormats,
+  isFieldPlacementFormat,
   normalizeSessionFormat,
 } from './tournaments/scoring'
 import { isFirebaseConfigured } from './firebase/config'
@@ -47,6 +48,7 @@ import {
   subscribeToGlobalSessionFormats,
 } from './firebase/formats'
 import type { TournamentInput } from './firebase/tournaments'
+import type { LeaderboardScope } from './tournaments/leaderboard'
 import './styles/App.scss'
 import golphyBanner from './assets/golphy-by-banner.svg'
 import leaderboardIcon from './assets/leaderboard-icon.svg'
@@ -72,6 +74,7 @@ interface PersistedAppSession {
   homeStep: 'choose' | 'new' | 'join';
   newRoundStep: 'course' | 'details';
   competitionType: TournamentMatchupFormat | 'match-play';
+  applyStrokeHandicaps: boolean;
   gameStarted: boolean;
   gameState: GameState;
   totalHoles: number;
@@ -103,8 +106,13 @@ function App() {
   } | null>(null);
   const [view, setView] = useState<'home' | 'game' | 'tournament'>('home');
   const [homeStep, setHomeStep] = useState<'choose' | 'new' | 'join'>('choose');
+  const [isHomeMenuOpen, setIsHomeMenuOpen] = useState(false);
+  const [showEditRoundPanel, setShowEditRoundPanel] = useState(false);
+  const [editRoundId, setEditRoundId] = useState<string | null>(null);
+  const [showEditRoundPlayerPicker, setShowEditRoundPlayerPicker] = useState(false);
   const [newRoundStep, setNewRoundStep] = useState<'course' | 'details'>('course');
   const [competitionType, setCompetitionType] = useState<TournamentMatchupFormat>('stroke');
+  const [applyStrokeHandicaps, setApplyStrokeHandicaps] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
   const [gameState, setGameState] = useState<GameState>(DEFAULT_GAME_STATE);
   const [newPlayerFirstName, setNewPlayerFirstName] = useState('');
@@ -145,12 +153,15 @@ function App() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [tournamentPanelMode, setTournamentPanelMode] = useState<'closed' | 'add' | 'edit'>('closed');
   const [activeTournamentId, setActiveTournamentId] = useState<string | null>(null);
+  const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope | null>(null);
+  const [isLeaderboardMenuOpen, setIsLeaderboardMenuOpen] = useState(false);
   const [tournamentViewMode, setTournamentViewMode] = useState<'dashboard' | 'manage'>('dashboard');
   const [activeRoundTournamentId, setActiveRoundTournamentId] = useState<string | null>(null);
   const [isSavingTournament, setIsSavingTournament] = useState(false);
   const [tournamentError, setTournamentError] = useState('');
   const [tournamentNotice, setTournamentNotice] = useState('');
   const [globalSessionFormats, setGlobalSessionFormats] = useState<TournamentSessionFormat[]>([]);
+  const [formatPanelMode, setFormatPanelMode] = useState<'closed' | 'add' | 'edit'>('closed');
   const [formatPanelOpen, setFormatPanelOpen] = useState(false);
   const [editingFormatId, setEditingFormatId] = useState<string | null>(null);
   const [formatName, setFormatName] = useState('');
@@ -175,11 +186,14 @@ function App() {
   const [isSessionRestored, setIsSessionRestored] = useState(false);
   const clientId = useMemo(() => createClientId(), []);
   const skipNextSyncRef = useRef(false);
+  const isEditingRoundRef = useRef(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const buildDefaultPars = (holes: number) => Array.from({ length: holes }, () => DEFAULT_PAR);
   const allSessionFormats = getTournamentSessionFormats(globalSessionFormats);
-  const defaultFormatId = allSessionFormats[0]?.id ?? 'singles';
+  // Standalone rounds fall back to stroke play; the first tournament format is a team format.
+  const defaultFormatId =
+    allSessionFormats.find((option) => option.id === 'stroke')?.id ?? allSessionFormats[0]?.id ?? 'stroke';
   const createLocalId = (): string => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();
@@ -204,7 +218,10 @@ function App() {
   };
 
   const competitionDefinition = getSessionFormatDefinition(competitionType, globalSessionFormats);
-  const usesTeamSides = competitionDefinition.hasTeams;
+  // A field format has teams but no fixed two-side matchup, so it is not size-locked.
+  const usesFieldTeams = isFieldPlacementFormat(competitionType, globalSessionFormats);
+  const usesTeamSides = competitionDefinition.hasTeams && !usesFieldTeams;
+  const supportsHandicapToggle = !usesTeamSides && competitionDefinition.baseFormat === 'stroke';
   const requiredRoundPlayers = usesTeamSides
     ? getSessionFormatPlayerCount(competitionType, globalSessionFormats) * 2
     : 0;
@@ -239,7 +256,7 @@ function App() {
       return;
     }
 
-    setCompetitionType(available[0]?.id ?? 'singles');
+    setCompetitionType(defaultFormatId);
   }, [globalSessionFormats, competitionType]);
 
   useEffect(() => {
@@ -281,6 +298,13 @@ function App() {
 
       if (typeof session.gameStarted === 'boolean') {
         setGameStarted(session.gameStarted);
+      }
+
+      // The round is authoritative once one is loaded; otherwise keep the last preference.
+      if (typeof session.gameState?.useHandicaps === 'boolean') {
+        setApplyStrokeHandicaps(session.gameState.useHandicaps);
+      } else if (typeof session.applyStrokeHandicaps === 'boolean') {
+        setApplyStrokeHandicaps(session.applyStrokeHandicaps);
       }
 
       if (typeof session.totalHoles === 'number' && session.totalHoles > 0) {
@@ -573,12 +597,24 @@ function App() {
   const openTournamentDashboard = (tournamentId: string) => {
     setActiveTournamentId(tournamentId);
     setTournamentViewMode('dashboard');
+    setLeaderboardScope(null);
+    setIsLeaderboardMenuOpen(false);
     setView('tournament');
     void refreshPlayerProfiles();
   };
 
+  const openTournamentLeaderboard = (tournamentId: string, scope: LeaderboardScope) => {
+    setIsLeaderboardMenuOpen(false);
+    setLeaderboardScope(scope);
+    setActiveTournamentId(tournamentId);
+    setTournamentViewMode('dashboard');
+    setView('tournament');
+  };
+
   useEffect(() => {
-    if (homeStep !== 'join') {
+    const needsRoundList = homeStep === 'join' || showEditRoundPanel;
+
+    if (!needsRoundList) {
       setAvailableRounds([]);
       setIsLoadingRounds(false);
       setSelectedJoinRoundId('');
@@ -609,7 +645,7 @@ function App() {
     };
 
     void loadAvailableRounds();
-  }, [homeStep]);
+  }, [homeStep, showEditRoundPanel]);
 
   useEffect(() => {
     return () => {
@@ -660,6 +696,7 @@ function App() {
       homeStep,
       newRoundStep,
       competitionType,
+      applyStrokeHandicaps,
       gameStarted,
       gameState,
       totalHoles,
@@ -676,6 +713,7 @@ function App() {
   }, [
     activeRoundTournamentId,
     activeTournamentId,
+    applyStrokeHandicaps,
     competitionType,
     gameStarted,
     gameState,
@@ -690,6 +728,10 @@ function App() {
     totalHoles,
     view,
   ]);
+
+  useEffect(() => {
+    isEditingRoundRef.current = showEditRoundPanel;
+  }, [showEditRoundPanel]);
 
   const subscribeToSharedRound = (roundId: string) => {
     if (unsubscribeRef.current) {
@@ -707,6 +749,7 @@ function App() {
         skipNextSyncRef.current = true;
         setGameState(remoteState);
         setTotalHoles(remoteState.totalHoles);
+        setApplyStrokeHandicaps(Boolean(remoteState.useHandicaps));
         setCompetitionType(
           normalizeStandaloneFormat(
             remoteState.sessionFormatId ??
@@ -715,7 +758,10 @@ function App() {
           )
         );
         setGameStarted(true);
-        setView('game');
+        // A teammate's score update should not pull the user out of the round editor.
+        if (!isEditingRoundRef.current) {
+          setView('game');
+        }
         setHomeStep('choose');
         setSyncError('');
       },
@@ -730,12 +776,43 @@ function App() {
     setGameState((prev) => updater(prev));
   };
 
-  const buildMatchupConfig = (players: Player[]): MatchupConfig | undefined => {
-    if (!competitionDefinition.hasTeams) {
+  const buildMatchupConfig = (
+    players: Player[],
+    formatId: TournamentMatchupFormat = competitionType
+  ): MatchupConfig | undefined => {
+    const definition = getSessionFormatDefinition(formatId, globalSessionFormats);
+
+    if (isFieldPlacementFormat(formatId, globalSessionFormats)) {
+      const teamSize = Math.max(1, definition.playersPerSide);
+      if (players.length < teamSize) {
+        return undefined;
+      }
+
+      const teams = [];
+      for (let start = 0; start < players.length; start += teamSize) {
+        const group = players.slice(start, start + teamSize);
+        teams.push({
+          id: `team-${teams.length + 1}`,
+          name: group.map((player) => player.name).join(' & ') || `Team ${teams.length + 1}`,
+          playerIds: group.map((player) => player.id),
+        });
+      }
+
+      return {
+        format: definition.baseFormat,
+        sessionFormatId: formatId,
+        scoringMode: definition.scoringMode,
+        resultMode: definition.resultMode,
+        ownBall: definition.ownBall,
+        teams,
+      };
+    }
+
+    if (!definition.hasTeams) {
       return undefined;
     }
 
-    const sideSize = getSessionFormatPlayerCount(competitionType, globalSessionFormats);
+    const sideSize = getSessionFormatPlayerCount(formatId, globalSessionFormats);
     const requiredPlayers = sideSize * 2;
     const selectedPlayers = players.slice(0, requiredPlayers);
 
@@ -749,11 +826,11 @@ function App() {
     const sideBLabel = sideBPlayers.map((player) => player.name).join(' & ') || 'Side B';
 
     return {
-      format: competitionDefinition.baseFormat,
-      sessionFormatId: competitionType,
-      scoringMode: competitionDefinition.scoringMode,
-      resultMode: competitionDefinition.resultMode,
-      ownBall: competitionDefinition.ownBall,
+      format: definition.baseFormat,
+      sessionFormatId: formatId,
+      scoringMode: definition.scoringMode,
+      resultMode: definition.resultMode,
+      ownBall: definition.ownBall,
       teams: [
         {
           id: 'team-a',
@@ -766,16 +843,18 @@ function App() {
           playerIds: sideBPlayers.map((player) => player.id),
         },
       ],
-      handicapRule:
-        competitionDefinition.handicapRule?.type === 'scramble-pair-percentage'
-          ? {
-              type: 'scramble-pair-percentage',
-              lowPercentage: competitionDefinition.handicapRule.lowPercentage,
-              highPercentage: competitionDefinition.handicapRule.highPercentage,
-              rounding: competitionDefinition.handicapRule.rounding,
-              prorateByHoles: competitionDefinition.handicapRule.prorateByHoles,
-            }
-          : undefined,
+      // Firestore rejects undefined, so only set a rule when the format has one.
+      ...(definition.handicapRule?.type === 'scramble-pair-percentage'
+        ? {
+            handicapRule: {
+              type: 'scramble-pair-percentage' as const,
+              lowPercentage: definition.handicapRule.lowPercentage,
+              highPercentage: definition.handicapRule.highPercentage,
+              rounding: definition.handicapRule.rounding,
+              prorateByHoles: definition.handicapRule.prorateByHoles,
+            },
+          }
+        : {}),
     };
   };
 
@@ -991,6 +1070,9 @@ function App() {
   };
 
   const resolvedPlayers = gameState.players.map(resolvePlayer);
+  const availableRoundPlayers = playerProfiles.filter(
+    (profile) => !gameState.players.some((player) => player.id === profile.id)
+  );
 
   const openRoundPlayerPicker = () => {
     setShowRoundPlayerForm(true);
@@ -1301,6 +1383,7 @@ function App() {
       scorecardId: selectedScorecard?.id,
       scorecardName: selectedScorecard?.name,
       playedSetLabels: buildPlayedSetLabels(),
+      useHandicaps: supportsHandicapToggle ? applyStrokeHandicaps : false,
       matchup: buildMatchupConfig(gameState.players),
     };
   };
@@ -1351,7 +1434,16 @@ function App() {
     setShowEditPlayerForm(false);
     setHomeStep('choose');
     setNewRoundStep('course');
-    setCompetitionType('stroke');
+    // Keep the active round's format so later edits don't silently rewrite it.
+    setCompetitionType(
+      gameStarted
+        ? normalizeStandaloneFormat(
+            gameState.sessionFormatId ??
+              gameState.matchup?.sessionFormatId ??
+              gameState.matchup?.format
+          )
+        : defaultFormatId
+    );
     setShowQuickPlayerForm(false);
     setShowQuickEditPlayerForm(false);
     setSyncError('');
@@ -1442,7 +1534,11 @@ function App() {
     }
   };
 
-  const openSharedRound = async (roundCode: string, sourceTournamentId?: string): Promise<boolean> => {
+  const openSharedRound = async (
+    roundCode: string,
+    sourceTournamentId?: string,
+    options?: { stayOnHome?: boolean }
+  ): Promise<boolean> => {
     if (!isFirebaseConfigured) {
       setSyncError('Firebase is not configured. Add VITE_FIREBASE_* values in .env.local first.');
       return false;
@@ -1472,9 +1568,12 @@ function App() {
         )
       );
       setActiveRoundTournamentId(sourceTournamentId ?? null);
+      setApplyStrokeHandicaps(Boolean(remoteState.useHandicaps));
       subscribeToSharedRound(normalizedRoundId);
       setGameStarted(true);
-      setView('game');
+      if (!options?.stayOnHome) {
+        setView('game');
+      }
       setHomeStep('choose');
       setShareNotice('');
       return true;
@@ -1554,6 +1653,114 @@ function App() {
     setCompetitionType('stroke');
     setShowRoundPlayerForm(false);
     setShowEditPlayerForm(false);
+  };
+
+  const closeHomePanels = () => {
+    setShowQuickPlayerForm(false);
+    setShowQuickEditPlayerForm(false);
+    setShowEditRoundPanel(false);
+    setShowEditRoundPlayerPicker(false);
+    setEditRoundId(null);
+    setCoursePanelMode('closed');
+    setTournamentPanelMode('closed');
+    setFormatPanelMode('closed');
+    closeFormatPanel();
+  };
+
+  const updateRoundFormat = (nextFormat: TournamentMatchupFormat) => {
+    setCompetitionType(nextFormat);
+    setPlayerProfileError('');
+    updateGameState((prev) => ({
+      ...prev,
+      sessionFormatId: nextFormat,
+      matchup: buildMatchupConfig(prev.players, nextFormat),
+    }));
+  };
+
+  const updateRoundHandicaps = (next: boolean) => {
+    setApplyStrokeHandicaps(next);
+    updateGameState((prev) => ({ ...prev, useHandicaps: next }));
+  };
+
+  const updateRoundAlias = (next: string) => {
+    setRoundAlias(next);
+    updateGameState((prev) => ({ ...prev, alias: next.trim() || undefined }));
+  };
+
+  const openActiveRoundEditor = () => {
+    closeHomePanels();
+    setView('home');
+    setHomeStep('choose');
+    setCompetitionType(
+      normalizeStandaloneFormat(
+        gameState.sessionFormatId ??
+          gameState.matchup?.sessionFormatId ??
+          gameState.matchup?.format
+      )
+    );
+    setApplyStrokeHandicaps(Boolean(gameState.useHandicaps));
+    setEditRoundId(sharedRoundId ?? 'current');
+    setShowEditRoundPanel(true);
+    void refreshPlayerProfiles();
+  };
+
+  const handleHomeMenuAction = (
+    action:
+      | 'new-round'
+      | 'join-round'
+      | 'edit-round'
+      | 'add-player'
+      | 'edit-player'
+      | 'add-course'
+      | 'edit-course'
+      | 'add-format'
+      | 'edit-format'
+      | 'add-tournament'
+      | 'edit-tournament'
+  ) => {
+    setIsHomeMenuOpen(false);
+    closeHomePanels();
+
+    switch (action) {
+      case 'new-round':
+        startNewRoundFlow();
+        break;
+      case 'join-round':
+        openHomeStep('join');
+        break;
+      case 'edit-round':
+        openHomeStep('choose');
+        setEditRoundId(null);
+        setShowEditRoundPanel(true);
+        void refreshPlayerProfiles();
+        break;
+      case 'add-player':
+        setShowQuickPlayerForm(true);
+        break;
+      case 'edit-player':
+        setShowQuickEditPlayerForm(true);
+        void refreshPlayerProfiles();
+        break;
+      case 'add-course':
+        setCoursePanelMode('add');
+        break;
+      case 'edit-course':
+        setCoursePanelMode('edit');
+        break;
+      case 'add-format':
+        setFormatPanelMode('add');
+        openFormatPanel();
+        break;
+      case 'edit-format':
+        setFormatPanelMode('edit');
+        break;
+      case 'add-tournament':
+        openTournamentPanel('add');
+        break;
+      case 'edit-tournament':
+        openTournamentPanel('edit');
+        break;
+    }
   };
 
   const resetSelectedPlayerEditing = () => {
@@ -1710,15 +1917,108 @@ function App() {
     </>
   );
 
+  const renderLeaderboardMenu = (tournamentId: string | null) => {
+    const menuTournament = tournamentId
+      ? tournaments.find((tournament) => tournament.id === tournamentId) ?? null
+      : null;
+    const menuSessions = menuTournament?.sessions ?? menuTournament?.rounds ?? [];
+    const menuMatches = menuSessions.flatMap((session) =>
+      session.matchups.map((matchup) => ({ session, matchup }))
+    );
+
+    return (
+      <div className="leaderboard-menu">
+        <button
+          type="button"
+          className="leaderboard-quick-link-btn"
+          aria-label="View leaderboard"
+          aria-haspopup={menuTournament ? 'true' : undefined}
+          aria-expanded={menuTournament ? isLeaderboardMenuOpen : undefined}
+          onClick={() => {
+            if (!menuTournament) {
+              setToastMessage('Leaderboard view coming soon.');
+              return;
+            }
+
+            setIsLeaderboardMenuOpen((open) => !open);
+            void refreshTournaments();
+          }}
+        >
+          <img src={leaderboardIcon} width="24" alt="" aria-hidden="true" />
+        </button>
+
+        {menuTournament && isLeaderboardMenuOpen && (
+          <>
+            <button
+              type="button"
+              className="home-menu-backdrop"
+              aria-label="Close leaderboard menu"
+              onClick={() => setIsLeaderboardMenuOpen(false)}
+            />
+            <div className="home-menu-dropdown leaderboard-menu-dropdown" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => openTournamentLeaderboard(menuTournament.id, { type: 'tournament' })}
+              >
+                Tournament leaderboard
+              </button>
+
+              {menuSessions.length > 0 && <span className="home-menu-heading">Sessions</span>}
+              {menuSessions.map((session) => (
+                <button
+                  key={session.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() =>
+                    openTournamentLeaderboard(menuTournament.id, {
+                      type: 'session',
+                      sessionId: session.id,
+                    })
+                  }
+                >
+                  {session.name}
+                </button>
+              ))}
+
+              {menuMatches.length > 0 && <span className="home-menu-heading">Matches</span>}
+              {menuMatches.map(({ session, matchup }) => (
+                <button
+                  key={matchup.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() =>
+                    openTournamentLeaderboard(menuTournament.id, {
+                      type: 'match',
+                      sessionId: session.id,
+                      matchupId: matchup.id,
+                    })
+                  }
+                >
+                  {session.name}: {matchup.name?.trim() || 'Match'}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   if (view === 'tournament' && activeTournamentId) {
     const activeTournament = tournaments.find((t) => t.id === activeTournamentId) ?? null;
 
     return (
       <div className="app">
-        <div className="header">
-          <button onClick={goHome} className="logo-btn" aria-label="Go to home">
-            <img src={golphyBanner} width="139" alt="Golphy Logo" className="logo" />
+        {toastMessage && <div className="toast-notice">{toastMessage}</div>}
+        <div className="scorecard-nav" aria-label="Tournament navigation">
+          <button type="button" onClick={goHome} className="scorecard-logo-btn" aria-label="Return to home">
+            <i className="bi bi-house" aria-hidden="true" />
           </button>
+
+          {activeTournament?.name && <h1 className="nav-title">{activeTournament.name}</h1>}
+
+          {renderLeaderboardMenu(activeTournamentId)}
         </div>
 
         {tournamentViewMode === 'manage' ? (
@@ -1756,6 +2056,8 @@ function App() {
             playerProfiles={playerProfiles}
             scorecards={scorecards}
             clientId={clientId}
+            leaderboardScope={leaderboardScope}
+            onCloseLeaderboard={() => setLeaderboardScope(null)}
             onManage={() => {
               setTournamentViewMode('manage');
             }}
@@ -1771,10 +2073,69 @@ function App() {
   if (view === 'home') {
     return (
       <div className="app">
-        <div className="header">
+        <div className="header home-header">
           <button onClick={goHome} className="logo-btn" aria-label="Go to home">
             <img src={golphyBanner} width="139" alt="Golphy Logo" className="logo" />
           </button>
+
+          <div className="home-menu">
+            <button
+              type="button"
+              className="home-menu-btn"
+              aria-label="Open menu"
+              aria-haspopup="true"
+              aria-expanded={isHomeMenuOpen}
+              onClick={() => setIsHomeMenuOpen((open) => !open)}
+            >
+              <i className={`bi ${isHomeMenuOpen ? 'bi-x-lg' : 'bi-list'}`} aria-hidden="true" />
+            </button>
+
+            {isHomeMenuOpen && (
+              <>
+                <button
+                  type="button"
+                  className="home-menu-backdrop"
+                  aria-label="Close menu"
+                  onClick={() => setIsHomeMenuOpen(false)}
+                />
+                <div className="home-menu-dropdown" role="menu">
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('new-round')}>
+                    New round
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('join-round')}>
+                    Join round
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('edit-round')}>
+                    Edit round
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('add-player')}>
+                    Add player
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('edit-player')}>
+                    Edit player
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('add-course')}>
+                    Add course
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('edit-course')}>
+                    Edit course
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('add-format')}>
+                    Add format
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('edit-format')}>
+                    Edit format
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('add-tournament')}>
+                    Add tournament
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => handleHomeMenuAction('edit-tournament')}>
+                    Edit tournament
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {gameStarted && (
@@ -1785,8 +2146,12 @@ function App() {
               {sharedRoundId && <span className="resume-code">Code: {sharedRoundId}</span>}
             </div>
             <div className="resume-actions">
-              <button onClick={() => setView('game')} className="resume-btn">Back to round</button>
-              <button onClick={endRound} className="end-btn">Exit round</button>
+              <button onClick={() => setView('game')} className="resume-btn">
+                <i className="bi bi-arrow-left" aria-hidden="true"></i>
+                Back to round</button>
+              <button onClick={endRound} className="end-btn" aria-label="Exit round" title="Exit round">
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
             </div>
           </div>
         )}
@@ -1795,179 +2160,302 @@ function App() {
           {toastMessage && <div className="toast-notice">{toastMessage}</div>}
           {homeStep === 'choose' && (
             <>
-              <h2>Start here</h2>
-              <p className="setup-intro">Choose one action to continue.</p>
-              <div className="home-actions">
-                <button type="button" className="home-action-card" onClick={startNewRoundFlow}>
-                  <span className="card-title">Start a new round</span>
-                  <span className="card-copy">Set the course, add players, and begin scoring.</span>
-                </button>
-                <button type="button" className="home-action-card" onClick={() => openHomeStep('join')}>
-                  <span className="card-title">Join an existing round</span>
-                  <span className="card-copy">Enter a round code from another player.</span>
-                </button>
-              </div>
+              {showEditRoundPanel && !editRoundId && (
+                <div className="home-panel">
+                  <h3>Edit round</h3>
+                  <div className="input-group">
+                    <label>Choose a round to edit</label>
+                    {isLoadingRounds ? (
+                      <p className="sync-note">Loading rounds...</p>
+                    ) : availableRounds.length === 0 ? (
+                      <p className="sync-note">No rounds found yet.</p>
+                    ) : (
+                      <div className="round-picker-list">
+                        {availableRounds.map((round) => {
+                          const displayName =
+                            round.alias?.trim() || round.scorecardName?.trim() || 'Round in progress';
 
-              <div className="quick-player-panel">
-                <h3>Players</h3>
-                {!showQuickPlayerForm && !showQuickEditPlayerForm ? (
-                  <div className="player-action-row">
-                    <button
-                      type="button"
-                      className="reveal-player-btn"
-                      onClick={() => setShowQuickPlayerForm(true)}
-                    >
-                      Add new
-                    </button>
-                    <button
-                      type="button"
-                      className="reveal-player-btn secondary"
-                      onClick={() => {
-                        setShowQuickEditPlayerForm(true)
-                        void refreshPlayerProfiles()
-                      }}
-                    >
-                      Edit existing
-                    </button>
+                          return (
+                            <button
+                              key={round.id}
+                              type="button"
+                              className="round-picker-item"
+                              disabled={isConnectingRound}
+                              onClick={() => {
+                                void (async () => {
+                                  const opened = await openSharedRound(round.id, undefined, {
+                                    stayOnHome: true,
+                                  });
+                                  if (opened) {
+                                    setEditRoundId(round.id);
+                                  }
+                                })();
+                              }}
+                            >
+                              <span className="round-picker-name">{displayName}</span>
+                              <span className="round-picker-meta">Round code: {round.id}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <>
-                    {showQuickPlayerForm && (
-                      <>
-                        <div className="player-profile-grid">
-                          <input
-                            type="text"
-                            value={newPlayerFirstName}
-                            onChange={(e) => setNewPlayerFirstName(e.target.value)}
-                            placeholder="First name"
-                            maxLength={30}
-                          />
-                          <input
-                            type="text"
-                            value={newPlayerLastName}
-                            onChange={(e) => setNewPlayerLastName(e.target.value)}
-                            placeholder="Last name"
-                            maxLength={30}
-                          />
-                          <input
-                            type="text"
-                            value={newPlayerNickname}
-                            onChange={(e) => setNewPlayerNickname(e.target.value)}
-                            placeholder="Nickname (optional)"
-                            maxLength={20}
-                          />
-                          <div className="field-with-label">
-                            <label htmlFor="quick-player-handicap">Handicap</label>
-                            <input
-                              id="quick-player-handicap"
-                              type="number"
-                              inputMode="decimal"
-                              value={newPlayerHandicap}
-                              onChange={(e) => setNewPlayerHandicap(e.target.value)}
-                              placeholder="e.g. 12.4"
-                              min={-10}
-                              max={54}
-                            />
+                  <button
+                    type="button"
+                    className="collapse-player-btn"
+                    onClick={() => setShowEditRoundPanel(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {showEditRoundPanel && editRoundId && (
+                <div className="home-panel">
+                  <h3>Edit round</h3>
+                  <button
+                    type="button"
+                    className="back-link-btn"
+                    onClick={() => {
+                      setEditRoundId(null);
+                      setShowEditRoundPlayerPicker(false);
+                    }}
+                  >
+                    Choose a different round
+                  </button>
+
+                  <div className="input-group">
+                    <label htmlFor="edit-round-name">Round name</label>
+                    <input
+                      id="edit-round-name"
+                      type="text"
+                      value={roundAlias}
+                      onChange={(event) => updateRoundAlias(event.target.value)}
+                      placeholder="e.g. Saturday at Pebble Beach"
+                      maxLength={40}
+                    />
+                  </div>
+
+                  <div className="input-group">
+                    <label htmlFor="edit-round-format">Competition</label>
+                    <select
+                      id="edit-round-format"
+                      value={competitionType}
+                      onChange={(event) => updateRoundFormat(normalizeStandaloneFormat(event.target.value))}
+                    >
+                      {allSessionFormats.map((formatOption) => (
+                        <option key={formatOption.id} value={formatOption.id}>
+                          {formatOption.name}
+                        </option>
+                      ))}
+                    </select>
+                    {usesTeamSides && gameState.players.length !== requiredRoundPlayers && (
+                      <p className="sync-note">
+                        {competitionLabel} requires exactly {requiredRoundPlayers} players.
+                      </p>
+                    )}
+                    {supportsHandicapToggle && (
+                      <label className="format-toggle-field">
+                        <input
+                          type="checkbox"
+                          checked={applyStrokeHandicaps}
+                          onChange={(event) => updateRoundHandicaps(event.target.checked)}
+                        />
+                        <span>Apply handicaps</span>
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="input-group">
+                    <label>Players</label>
+                    {gameState.players.length === 0 ? (
+                      <p className="sync-note">No players in this round yet.</p>
+                    ) : (
+                      <div className="players-list">
+                        {resolvedPlayers.map((player) => (
+                          <div key={player.id} className="player-item">
+                            <div className="color-indicator" style={{ backgroundColor: player.color }} />
+                            <div className="player-info-wrap">
+                              <span className="player-name">{player.name}</span>
+                              <span className="player-meta">ID: {player.id}</span>
+                            </div>
+                            <button onClick={() => removePlayer(player.id)} className="remove-btn">
+                              Remove
+                            </button>
                           </div>
-                        </div>
-                        <div className="add-player-form compact">
-                          <button
-                            onClick={handleCreatePlayerOnly}
-                            disabled={
-                              isSavingPlayer ||
-                              !newPlayerFirstName.trim() ||
-                              !newPlayerLastName.trim()
-                            }
-                          >
-                            {isSavingPlayer ? 'Saving player...' : 'Create player'}
-                          </button>
-                        </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {!showEditRoundPlayerPicker ? (
+                      <button
+                        type="button"
+                        className="reveal-player-btn"
+                        onClick={() => {
+                          setShowEditRoundPlayerPicker(true);
+                          void refreshPlayerProfiles();
+                        }}
+                      >
+                        Add player
+                      </button>
+                    ) : (
+                      <div className="player-picker-panel">
+                        {isLoadingPlayerProfiles ? (
+                          <p className="sync-note">Loading players...</p>
+                        ) : availableRoundPlayers.length === 0 ? (
+                          <p className="sync-note">No other players available to add.</p>
+                        ) : (
+                          <div className="player-picker-list">
+                            {availableRoundPlayers.map((profile) => (
+                              <button
+                                key={profile.id}
+                                type="button"
+                                className="player-picker-item"
+                                onClick={() => {
+                                  addExistingPlayerToRound(profile);
+                                  setShowEditRoundPlayerPicker(false);
+                                }}
+                              >
+                                <span className="player-picker-name">{getRoundPlayerDisplayName(profile)}</span>
+                                <span className="player-picker-meta">Handicap: {profile.handicap}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         <button
                           type="button"
                           className="collapse-player-btn"
-                          onClick={() => setShowQuickPlayerForm(false)}
+                          onClick={() => setShowEditRoundPlayerPicker(false)}
                         >
                           Cancel
                         </button>
-                      </>
+                      </div>
                     )}
-
-                    {showQuickEditPlayerForm && (
-                      <>
-                        {renderPlayerSelectionEditor('home', () => setShowQuickEditPlayerForm(false))}
-                      </>
-                    )}
-                  </>
-                )}
-
-                {createdPlayerSummary && (
-                  <div className="player-created-summary">
-                    <strong>New player created</strong>
-                    <span>ID: {createdPlayerSummary.id}</span>
-                    <span>First name: {createdPlayerSummary.firstName}</span>
-                    <span>Last name: {createdPlayerSummary.lastName}</span>
-                    <span>Nickname: {createdPlayerSummary.nickname || 'None'}</span>
-                    <span>Handicap: {createdPlayerSummary.handicap}</span>
                   </div>
-                )}
-              </div>
 
-              <div className="quick-course-panel">
-                <h3>Courses</h3>
-                {coursePanelMode === 'closed' ? (
-                  <div className="player-action-row">
-                    <button
-                      type="button"
-                      className="reveal-player-btn"
-                      onClick={() => setCoursePanelMode('add')}
-                    >
-                      Add new
-                    </button>
-                    <button
-                      type="button"
-                      className="reveal-player-btn secondary"
-                      onClick={() => setCoursePanelMode('edit')}
-                    >
-                      Edit existing
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <ScorecardSelector
-                      scorecards={scorecards}
-                      selectedId={homeCourseSelection?.id ?? null}
-                      onSelect={setHomeCourseSelection}
-                      onCreate={handleCreateScorecard}
-                      onUpdate={handleUpdateScorecard}
-                      isSaving={isCreatingScorecard}
-                      showOptions={coursePanelMode === 'edit'}
-                      allowBlankCourse={false}
-                      initialFormMode={coursePanelMode === 'add' ? 'create' : 'closed'}
+                  {playerProfileError && <p className="sync-error">{playerProfileError}</p>}
+
+                  <button
+                    type="button"
+                    className="collapse-player-btn"
+                    onClick={() => {
+                      setShowEditRoundPanel(false);
+                      setShowEditRoundPlayerPicker(false);
+                      setEditRoundId(null);
+                    }}
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {showQuickPlayerForm && (
+                <div className="home-panel">
+                  <h3>Add player</h3>
+                  <div className="player-profile-grid">
+                    <input
+                      type="text"
+                      value={newPlayerFirstName}
+                      onChange={(e) => setNewPlayerFirstName(e.target.value)}
+                      placeholder="First name"
+                      maxLength={30}
                     />
+                    <input
+                      type="text"
+                      value={newPlayerLastName}
+                      onChange={(e) => setNewPlayerLastName(e.target.value)}
+                      placeholder="Last name"
+                      maxLength={30}
+                    />
+                    <input
+                      type="text"
+                      value={newPlayerNickname}
+                      onChange={(e) => setNewPlayerNickname(e.target.value)}
+                      placeholder="Nickname (optional)"
+                      maxLength={20}
+                    />
+                    <div className="field-with-label">
+                      <label htmlFor="quick-player-handicap">Handicap</label>
+                      <input
+                        id="quick-player-handicap"
+                        type="number"
+                        inputMode="decimal"
+                        value={newPlayerHandicap}
+                        onChange={(e) => setNewPlayerHandicap(e.target.value)}
+                        placeholder="e.g. 12.4"
+                        min={-10}
+                        max={54}
+                      />
+                    </div>
+                  </div>
+                  <div className="add-player-form compact">
                     <button
-                      type="button"
-                      className="collapse-player-btn"
-                      onClick={() => setCoursePanelMode('closed')}
+                      onClick={handleCreatePlayerOnly}
+                      disabled={
+                        isSavingPlayer ||
+                        !newPlayerFirstName.trim() ||
+                        !newPlayerLastName.trim()
+                      }
                     >
-                      Cancel
-                    </button>
-                  </>
-                )}
-              </div>
-
-              <div className="quick-course-panel">
-                <h3>Formats</h3>
-                {!formatPanelOpen ? (
-                  <div className="player-action-row">
-                    <button
-                      type="button"
-                      className="reveal-player-btn"
-                      onClick={openFormatPanel}
-                    >
-                      Add new
+                      {isSavingPlayer ? 'Saving player...' : 'Create player'}
                     </button>
                   </div>
-                ) : (
+                  <button
+                    type="button"
+                    className="collapse-player-btn"
+                    onClick={() => setShowQuickPlayerForm(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {showQuickEditPlayerForm && (
+                <div className="home-panel">
+                  <h3>Edit player</h3>
+                  {renderPlayerSelectionEditor('home', () => setShowQuickEditPlayerForm(false))}
+                </div>
+              )}
+
+              {createdPlayerSummary && (
+                <div className="player-created-summary">
+                  <strong>New player created</strong>
+                  <span>ID: {createdPlayerSummary.id}</span>
+                  <span>First name: {createdPlayerSummary.firstName}</span>
+                  <span>Last name: {createdPlayerSummary.lastName}</span>
+                  <span>Nickname: {createdPlayerSummary.nickname || 'None'}</span>
+                  <span>Handicap: {createdPlayerSummary.handicap}</span>
+                </div>
+              )}
+
+              {coursePanelMode !== 'closed' && (
+                <div className="home-panel">
+                  <h3>{coursePanelMode === 'add' ? 'Add course' : 'Edit course'}</h3>
+                  <ScorecardSelector
+                    scorecards={scorecards}
+                    selectedId={homeCourseSelection?.id ?? null}
+                    onSelect={setHomeCourseSelection}
+                    onCreate={handleCreateScorecard}
+                    onUpdate={handleUpdateScorecard}
+                    isSaving={isCreatingScorecard}
+                    showOptions={coursePanelMode === 'edit'}
+                    allowBlankCourse={false}
+                    initialFormMode={coursePanelMode === 'add' ? 'create' : 'closed'}
+                  />
+                  <button
+                    type="button"
+                    className="collapse-player-btn"
+                    onClick={() => setCoursePanelMode('closed')}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {formatPanelMode !== 'closed' && (
+                <div className="home-panel">
+                  <h3>{formatPanelMode === 'add' ? 'Add format' : 'Edit format'}</h3>
+                  {formatPanelOpen && (
                   <>
                     <div className="player-profile-grid">
                       <input
@@ -2053,20 +2541,25 @@ function App() {
                       <button
                         type="button"
                         className="reveal-player-btn secondary"
-                        onClick={closeFormatPanel}
+                        onClick={() => {
+                          closeFormatPanel();
+                          if (formatPanelMode === 'add') {
+                            setFormatPanelMode('closed');
+                          }
+                        }}
                         disabled={isSavingFormat}
                       >
                         Cancel
                       </button>
                     </div>
                   </>
-                )}
+                  )}
 
                 <p className="quick-player-copy">
                   Built-in formats are always available. Add custom formats here for all rounds and tournaments.
                 </p>
 
-                {globalSessionFormats.length > 0 && (
+                {formatPanelMode === 'edit' && globalSessionFormats.length > 0 && (
                   <div className="round-picker-list">
                     {globalSessionFormats.map((format) => (
                       <div key={format.id} className="round-picker-item">
@@ -2105,72 +2598,67 @@ function App() {
 
                 {formatMessage && <p className="share-notice">{formatMessage}</p>}
                 {formatError && <p className="sync-error">{formatError}</p>}
-              </div>
+                  <button
+                    type="button"
+                    className="collapse-player-btn"
+                    onClick={() => {
+                      closeFormatPanel();
+                      setFormatPanelMode('closed');
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
 
-              <div className="quick-course-panel">
+              {tournamentPanelMode !== 'closed' && (
+                <div className="home-panel">
+                  <h3>{tournamentPanelMode === 'add' ? 'Add tournament' : 'Edit tournament'}</h3>
+                  <TournamentManager
+                    mode={tournamentPanelMode}
+                    tournaments={tournaments}
+                    playerProfiles={playerProfiles}
+                    isSaving={isSavingTournament}
+                    onCreate={handleCreateTournament}
+                    onUpdate={handleUpdateTournament}
+                    onDelete={handleDeleteTournament}
+                  />
+                  {tournamentNotice && <p className="share-notice">{tournamentNotice}</p>}
+                  {tournamentError && <p className="sync-error">{tournamentError}</p>}
+                  <button
+                    type="button"
+                    className="collapse-player-btn"
+                    onClick={() => setTournamentPanelMode('closed')}
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+
+              <div className="home-panel">
                 <h3>Tournaments</h3>
-                {tournamentPanelMode === 'closed' ? (
-                  <>
-                    <div className="player-action-row">
-                      <button
-                        type="button"
-                        className="reveal-player-btn"
-                        onClick={() => openTournamentPanel('add')}
-                      >
-                        Add new
-                      </button>
-                      <button
-                        type="button"
-                        className="reveal-player-btn secondary"
-                        onClick={() => openTournamentPanel('edit')}
-                      >
-                        Edit existing
-                      </button>
-                    </div>
-
-                    {tournaments.length > 0 && (
-                      <div className="round-picker-list">
-                        {tournaments.map((tournament) => (
-                          <button
-                            key={tournament.id}
-                            type="button"
-                            className="round-picker-item"
-                            onClick={() => openTournamentDashboard(tournament.id)}
-                          >
-                            <span className="round-picker-name">{tournament.name}</span>
-                            <span className="round-picker-meta">
-                              {tournament.format === 'team' ? 'Team' : 'Individual'} ·{' '}
-                              {tournament.entries.length}{' '}
-                              {tournament.format === 'team' ? 'teams' : 'players'} ·{' '}
-                              {(tournament.sessions ?? tournament.rounds ?? []).length} session
-                              {(tournament.sessions ?? tournament.rounds ?? []).length === 1 ? '' : 's'}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
+                {tournaments.length === 0 ? (
+                  <p className="sync-note">No tournaments yet. Add one from the menu.</p>
                 ) : (
-                  <>
-                    <TournamentManager
-                      mode={tournamentPanelMode}
-                      tournaments={tournaments}
-                      playerProfiles={playerProfiles}
-                      isSaving={isSavingTournament}
-                      onCreate={handleCreateTournament}
-                      onUpdate={handleUpdateTournament}
-                      onDelete={handleDeleteTournament}
-                    />
-                    {tournamentNotice && <p className="share-notice">{tournamentNotice}</p>}
-                    {tournamentError && <p className="sync-error">{tournamentError}</p>}
-                    <button
-                      type="button"
-                      className="collapse-player-btn"
-                      onClick={() => setTournamentPanelMode('closed')}
-                    >
-                      Close
-                    </button>
-                  </>
+                  <div className="round-picker-list">
+                    {tournaments.map((tournament) => (
+                      <button
+                        key={tournament.id}
+                        type="button"
+                        className="round-picker-item"
+                        onClick={() => openTournamentDashboard(tournament.id)}
+                      >
+                        <span className="round-picker-name">{tournament.name}</span>
+                        <span className="round-picker-meta">
+                          {tournament.format === 'team' ? 'Team' : 'Individual'} ·{' '}
+                          {tournament.entries.length}{' '}
+                          {tournament.format === 'team' ? 'teams' : 'players'} ·{' '}
+                          {(tournament.sessions ?? tournament.rounds ?? []).length} session
+                          {(tournament.sessions ?? tournament.rounds ?? []).length === 1 ? '' : 's'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             </>
@@ -2388,6 +2876,21 @@ function App() {
                   <p className="sync-note">
                     {competitionLabel} requires exactly {requiredRoundPlayers} players.
                   </p>
+                )}
+                {supportsHandicapToggle && (
+                  <>
+                    <label className="format-toggle-field">
+                      <input
+                        type="checkbox"
+                        checked={applyStrokeHandicaps}
+                        onChange={(event) => setApplyStrokeHandicaps(event.target.checked)}
+                      />
+                      <span>Apply handicaps</span>
+                    </label>
+                    <p className="sync-note">
+                      Net scores use each player's handicap, allocated by stroke index.
+                    </p>
+                  </>
                 )}
               </div>
 
@@ -2653,14 +3156,22 @@ function App() {
           <i className="bi bi-house" aria-hidden="true" />
         </button>
 
-        <button
-          type="button"
-          className="leaderboard-quick-link-btn"
-          aria-label="View leaderboard"
-          onClick={() => setToastMessage('Leaderboard view coming soon.')}
-        >
-          <img src={leaderboardIcon} width="24" alt="" aria-hidden="true" />
-        </button>
+        {activeRoundTournament && activeRoundTournamentId && (
+          <div className="round-tournament-row">
+            <button
+              type="button"
+              className="round-tournament-back-btn"
+              onClick={() => openTournamentDashboard(activeRoundTournamentId)}
+              aria-label="Back to tournament"
+              title="Back to tournament"
+            >
+              <i className="bi bi-chevron-left" aria-hidden="true" />
+              <span className="round-tournament-back-label">{activeRoundTournament.name}</span>
+            </button>
+          </div>
+        )}
+
+        {renderLeaderboardMenu(activeRoundTournamentId)}
       </div>
 
       <ScoreTable
@@ -2670,12 +3181,8 @@ function App() {
         parValues={gameState.parValues ?? buildDefaultPars(gameState.totalHoles)}
         roundTitle={roundTitle}
         matchInfo={matchInfoContent}
-        tournamentName={activeRoundTournament?.name}
-        onTournamentLinkClick={
-          activeRoundTournamentId
-            ? () => openTournamentDashboard(activeRoundTournamentId)
-            : undefined
-        }
+        onEditRound={openActiveRoundEditor}
+        useHandicaps={gameState.useHandicaps}
         holeDetails={gameState.holeDetails}
         courseName={liveCourseName}
         setLabels={gameState.playedSetLabels}

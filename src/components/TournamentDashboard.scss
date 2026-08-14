@@ -22,14 +22,8 @@
   justify-content: space-between;
   gap: $spacing-sm;
 
-  h2 {
-    margin: 0;
-    font-size: $font-lg;
-    color: $dark-color;
-  }
-
   p {
-    margin: 2px 0 0;
+    margin: 0;
     font-size: $font-sm;
     color: $gray;
   }

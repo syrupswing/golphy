@@ -16,46 +16,6 @@
     margin: 20px 12px 8px;
   }
 
-  .round-tournament-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 20px 12px 0;
-  }
-
-  // The breadcrumb owns the top spacing when it leads the page.
-  .round-tournament-row + .course-name-heading {
-    margin-top: 4px;
-  }
-
-  .round-tournament-back-btn {
-    padding: 4px 12px 4px 8px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: color.adjust($primary-color, $lightness: -10%);
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    justify-content: center;
-    cursor: pointer;
-
-    &:hover {
-      background: color.adjust($primary-color, $lightness: 60%);
-      color: color.adjust($primary-color, $lightness: -18%);
-    }
-
-    &:focus-visible {
-      outline: 2px solid color.adjust($primary-color, $lightness: -4%);
-      outline-offset: 1px;
-    }
-
-    .bi {
-      font-size: 14px;
-      line-height: 1;
-    }
-  }
-
   .round-tournament-name {
     margin: 0;
     color: color.adjust($dark-color, $lightness: 18%);
@@ -66,11 +26,8 @@
   }
 
   .matchup-handicap-disclosure {
+    position: relative;
     margin: 12px 12px 12px;
-    border: 1px solid color.adjust($light-color, $lightness: -12%);
-    border-radius: $border-radius-sm;
-    background: $white;
-    padding: 6px 8px;
 
     summary {
       cursor: pointer;
@@ -78,6 +35,33 @@
       font-size: $font-xs;
       font-weight: 600;
       text-align: left;
+      padding-right: 32px;
+    }
+  }
+
+  .round-edit-btn {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid color.adjust($light-color, $lightness: -12%);
+    border-radius: $border-radius-sm;
+    background: $white;
+    color: color.adjust($primary-color, $lightness: -10%);
+    cursor: pointer;
+
+    &:hover {
+      background: color.adjust($light-color, $lightness: 2%);
+    }
+
+    &:focus-visible {
+      outline: 2px solid $primary-color;
+      outline-offset: 1px;
     }
   }
 

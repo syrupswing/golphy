@@ -23,6 +23,11 @@
   justify-content: flex-start;
   padding: $spacing-md;
 
+  &.home-header {
+    justify-content: space-between;
+    align-items: center;
+  }
+
   .hole-info {
     display: flex;
     justify-content: center;
@@ -31,6 +36,106 @@
     font-size: $font-lg;
     font-weight: 600;
   }
+}
+
+.home-menu {
+  position: relative;
+}
+
+.home-menu-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: $border-radius-md;
+  background: $white;
+  border: 1px solid color.adjust($light-color, $lightness: -8%);
+  box-shadow: $shadow-sm;
+  color: $primary-color;
+  font-size: $font-lg;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+
+  &:focus-visible {
+    outline: 2px solid $primary-color;
+    outline-offset: 2px;
+  }
+}
+.setup-intro {
+  padding: 32px 32px 0;
+  font-weight: 500;
+  color: $dark-color;
+}
+.home-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 18;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.home-menu-dropdown {
+  position: absolute;
+  top: calc(100% + #{$spacing-xs});
+  right: 0;
+  z-index: 19;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  background: $white;
+  border: 1px solid color.adjust($light-color, $lightness: -10%);
+  border-radius: $border-radius-md;
+  box-shadow: $shadow-md;
+  overflow: hidden;
+
+  button {
+    background: transparent;
+    border: none;
+    text-align: left;
+    padding: $spacing-md;
+    font-size: $font-md;
+    font-weight: 600;
+    color: $dark-color;
+
+    &:hover {
+      background: $light-color;
+    }
+
+    &:focus-visible {
+      outline: 2px solid $primary-color;
+      outline-offset: -2px;
+    }
+
+    + button {
+      border-top: 1px solid color.adjust($light-color, $lightness: -6%);
+    }
+  }
+
+  .home-menu-heading {
+    padding: $spacing-sm $spacing-md 4px;
+    border-top: 1px solid color.adjust($light-color, $lightness: -6%);
+    background: $light-color;
+    color: $gray;
+    font-size: $font-xs;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+}
+
+.leaderboard-menu {
+  position: relative;
+  pointer-events: auto;
+  flex-shrink: 0;
+}
+
+.leaderboard-menu-dropdown {
+  left: auto;
+  right: 0;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .logo-btn {
@@ -87,13 +192,18 @@
 
   .resume-btn {
     background: $primary-color;
+    border: none;
     color: $white;
     border-radius: $border-radius-sm;
-    padding: $spacing-sm $spacing-md;
+    padding: 0 12px;
     font-weight: 600;
 
     &:hover {
       background: color.adjust($primary-color, $lightness: -8%);
+    }
+
+    i {
+      margin-right: 8px;
     }
   }
 
@@ -101,8 +211,14 @@
     background: $light-color;
     color: $danger-color;
     border-radius: $border-radius-sm;
-    padding: $spacing-sm $spacing-md;
-    font-weight: 600;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: $font-md;
+    line-height: 1;
     border: 1px solid $danger-color;
 
     &:hover {
@@ -157,7 +273,7 @@
 
 .setup-screen {
   background: $white;
-  padding: $spacing-xl;
+  margin: $spacing-xl;
   border-radius: $border-radius-lg;
   box-shadow: $shadow-md;
 
@@ -179,12 +295,16 @@
   }
 
   .quick-player-panel,
-  .quick-course-panel {
+  .quick-course-panel,
+  .home-panel {
     margin-top: $spacing-lg;
     padding: $spacing-md;
-    background: color.adjust($light-color, $lightness: -1%);
     border-radius: $border-radius-md;
     border: 1px solid color.adjust($light-color, $lightness: -10%);
+
+    &:first-child {
+      margin-top: 0;
+    }
 
     h3 {
       margin: 0 0 $spacing-sm;
@@ -643,6 +763,20 @@
       border-radius: $border-radius-md;
       font-size: $font-md;
     }
+
+    .format-toggle-field {
+      display: flex;
+      align-items: center;
+      gap: $spacing-xs;
+      margin: $spacing-sm 0 0;
+      font-weight: 600;
+      color: $dark-color;
+
+      input {
+        width: auto;
+        padding: 0;
+      }
+    }
   }
 
   .players-list {
@@ -894,7 +1028,8 @@
   }
 
   @media (max-width: $mobile) {
-    padding: $spacing-lg $spacing-md;
+    padding: 0;
+    margin: 12px;
 
     .step-actions {
       flex-direction: column;
@@ -950,19 +1085,76 @@
 }
 
 .scorecard-nav {
-  position: sticky;
-  top: $spacing-sm;
-  z-index: 15;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
+  gap: $spacing-sm;
   pointer-events: none;
-  padding: 0 $spacing-sm;
+  padding: $spacing-sm;
+}
+
+.round-tournament-row {
+  pointer-events: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scorecard-nav .nav-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  text-align: center;
+  font-size: $font-lg;
+  font-weight: 700;
+  color: $dark-color;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.round-tournament-back-btn {
+  max-width: 100%;
+  padding: 4px 12px 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: color.adjust($primary-color, $lightness: -10%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    background: color.adjust($primary-color, $lightness: 60%);
+    color: color.adjust($primary-color, $lightness: -18%);
+  }
+
+  &:focus-visible {
+    outline: 2px solid color.adjust($primary-color, $lightness: -4%);
+    outline-offset: 1px;
+  }
+
+  .bi {
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+}
+
+.round-tournament-back-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scorecard-logo-btn,
 .leaderboard-quick-link-btn {
   pointer-events: auto;
+  flex-shrink: 0;
   width: 44px;
   height: 44px;
   border-radius: 14px;

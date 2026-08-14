@@ -1,0 +1,120 @@
+@use 'sass:color';
+@use '../styles/variables' as *;
+
+// Styled after a hand-set major championship board: white panels, black rules,
+// red for under par and green for even or over.
+.masters-board {
+  $board-ink: #111111;
+  $board-panel: #ffffff;
+  $board-under: #b3132a;
+  $board-over: #0d5c2b;
+
+  margin: 0 0 $spacing-lg;
+  padding: $spacing-sm;
+  border-radius: $border-radius-md;
+  background: $board-panel;
+  border: 1px solid color.adjust($light-color, $lightness: -10%);
+  box-shadow: $shadow-md;
+
+  .masters-board-head {
+    text-align: center;
+    padding: $spacing-sm 0;
+
+    h2 {
+      margin: 0;
+      color: $board-ink;
+      font-size: $font-xl;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    p {
+      margin: 4px 0 0;
+      color: $gray;
+      font-size: $font-sm;
+      font-weight: 600;
+    }
+  }
+
+  .masters-board-empty {
+    margin: 0;
+    padding: $spacing-lg;
+    text-align: center;
+    color: $gray;
+    font-weight: 600;
+  }
+
+  .masters-board-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 2px solid $board-ink;
+    border-radius: 2px;
+    background: $board-panel;
+  }
+
+  .masters-board-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+
+    th,
+    td {
+      border: 1px solid $board-ink;
+      background: $board-panel;
+      color: $board-ink;
+      text-align: center;
+      padding: 4px 2px;
+      font-size: $font-sm;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    thead th {
+      font-size: $font-md;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+  }
+
+  .masters-label,
+  .masters-name {
+    text-align: left;
+    padding-left: $spacing-sm;
+    min-width: 120px;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+  }
+
+  .masters-name {
+    display: table-cell;
+    text-transform: uppercase;
+  }
+
+  .masters-name-detail {
+    display: block;
+    font-size: $font-xs;
+    font-weight: 600;
+    text-transform: none;
+    color: color.adjust(#111111, $lightness: 45%);
+  }
+
+  .masters-hole,
+  .masters-score {
+    min-width: 26px;
+  }
+
+  .masters-prior,
+  .masters-total {
+    min-width: 34px;
+  }
+
+  .is-under {
+    color: $board-under;
+  }
+
+  .is-over {
+    color: $board-over;
+  }
+}

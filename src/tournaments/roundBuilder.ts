@@ -133,14 +133,14 @@ export const buildMatchRoundState = ({
         resultMode: formatDefinition.resultMode,
         ownBall: formatDefinition.ownBall,
         teams: sides.map((side, index) => ({
-          id: index === 0 ? 'team-a' : 'team-b',
-          name: buildSideLabel(side, entries, playerProfiles, index === 0 ? 'Side A' : 'Side B'),
+          id: index === 0 ? 'team-a' : index === 1 ? 'team-b' : `team-${index + 1}`,
+          name: buildSideLabel(side, entries, playerProfiles, `Side ${index + 1}`),
           playerIds: [...side.playerIds],
         })),
-        handicapRule:
-          formatDefinition.handicapRule?.type === 'scramble-pair-percentage'
-            ? { ...formatDefinition.handicapRule }
-            : undefined,
+        // Firestore rejects undefined, so only set a rule when the format has one.
+        ...(formatDefinition.handicapRule?.type === 'scramble-pair-percentage'
+          ? { handicapRule: { ...formatDefinition.handicapRule } }
+          : {}),
       }
     : undefined;
 

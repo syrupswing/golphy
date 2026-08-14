@@ -9,8 +9,8 @@ interface ScoreTableProps {
   parValues: number[];
   roundTitle?: string;
   matchInfo?: React.ReactNode;
-  tournamentName?: string;
-  onTournamentLinkClick?: () => void;
+  onEditRound?: () => void;
+  useHandicaps?: boolean;
   holeDetails?: HoleInfo[];
   courseName?: string;
   setLabels?: string[];
@@ -149,7 +149,7 @@ function MatchChevron({ direction }: { direction: 'up' | 'down' }) {
   );
 }
 
-export default function ScoreTable({ players, scores, totalHoles, parValues, roundTitle, matchInfo, tournamentName, onTournamentLinkClick, holeDetails, courseName, setLabels, matchup, onScoreUpdate }: ScoreTableProps) {
+export default function ScoreTable({ players, scores, totalHoles, parValues, roundTitle, matchInfo, onEditRound, useHandicaps, holeDetails, courseName, setLabels, matchup, onScoreUpdate }: ScoreTableProps) {
   const [hasHorizontalScrollOffset, setHasHorizontalScrollOffset] = React.useState(false);
   const [playerColumnWidth, setPlayerColumnWidth] = React.useState(() => {
     try {
@@ -415,8 +415,67 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
     };
   }, [holeDetails, isSinglesHeadToHead, matchupSides, players, totalHoles]);
 
-  const getStrokesGiven = (playerId: string, hole: number): number =>
-    matchPlayStrokes?.playerId === playerId ? matchPlayStrokes.byHole[hole] ?? 0 : 0;
+  // Stroke play net scoring: strokes are relative to the lowest handicap in the round.
+  const strokePlayStrokes = React.useMemo((): Record<string, Record<number, number>> | null => {
+    if (!useHandicaps || isSinglesHeadToHead || isTeamScrambleHeadToHead) {
+      return null;
+    }
+
+    const rankedHoles = Array.from({ length: totalHoles }, (_, index) => ({
+      hole: index + 1,
+      strokeIndex: holeDetails?.[index]?.handicap,
+    })).filter((entry): entry is { hole: number; strokeIndex: number } =>
+      Number.isFinite(entry.strokeIndex)
+    );
+
+    if (rankedHoles.length === 0) {
+      return null;
+    }
+
+    const playingHandicaps = players
+      .filter((player) => Number.isFinite(player.handicap))
+      .map((player) => ({
+        id: player.id,
+        playingHandicap: Math.round(prorateHandicapByHoles(player.handicap as number, totalHoles)),
+      }));
+
+    if (playingHandicaps.length === 0) {
+      return null;
+    }
+
+    const lowestHandicap = Math.min(...playingHandicaps.map((entry) => entry.playingHandicap));
+    const byPlayer: Record<string, Record<number, number>> = {};
+
+    playingHandicaps.forEach(({ id, playingHandicap }) => {
+      const allowance = playingHandicap - lowestHandicap;
+      if (allowance <= 0) {
+        return;
+      }
+
+      const base = Math.floor(allowance / rankedHoles.length);
+      const remainder = allowance % rankedHoles.length;
+      const byHole: Record<number, number> = {};
+
+      rankedHoles.forEach(({ hole, strokeIndex }) => {
+        const strokes = base + (strokeIndex <= remainder ? 1 : 0);
+        if (strokes > 0) {
+          byHole[hole] = strokes;
+        }
+      });
+
+      byPlayer[id] = byHole;
+    });
+
+    return Object.keys(byPlayer).length > 0 ? byPlayer : null;
+  }, [holeDetails, isSinglesHeadToHead, isTeamScrambleHeadToHead, players, totalHoles, useHandicaps]);
+
+  const getStrokesGiven = (playerId: string, hole: number): number => {
+    if (matchPlayStrokes?.playerId === playerId) {
+      return matchPlayStrokes.byHole[hole] ?? 0;
+    }
+
+    return strokePlayStrokes?.[playerId]?.[hole] ?? 0;
+  };
 
   const scrambleSideStrokes = React.useMemo((): {
     sideHandicaps: [number, number];
@@ -742,12 +801,13 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
   };
 
   const getRowStrokesGiven = (row: ScoreRow, hole: number): number => {
-    const teamStrokesGiven =
-      scrambleSideStrokes && row.sideIndex !== undefined
-        ? getSideStrokesGiven(row.sideIndex, hole)
-        : 0;
+    if (isSinglesHeadToHead || strokePlayStrokes) {
+      return getStrokesGiven(row.primaryPlayerId, hole);
+    }
 
-    return isSinglesHeadToHead ? getStrokesGiven(row.primaryPlayerId, hole) : teamStrokesGiven;
+    return scrambleSideStrokes && row.sideIndex !== undefined
+      ? getSideStrokesGiven(row.sideIndex, hole)
+      : 0;
   };
 
   const getRowNetScore = (row: ScoreRow, hole: number): number | null => {
@@ -1012,22 +1072,6 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
 
   return (
     <div className="score-table-container">
-      {tournamentName && (
-        <div className="round-tournament-row">
-          {onTournamentLinkClick && (
-            <button
-              type="button"
-              className="round-tournament-back-btn"
-              onClick={onTournamentLinkClick}
-              aria-label="Back to tournament"
-              title="Back to tournament"
-            >
-              <i className="bi bi-chevron-left" aria-hidden="true" />
-              {tournamentName}
-            </button>
-          )}
-        </div>
-      )}
       {roundTitle && <h2 className="course-name-heading">{roundTitle}</h2>}
       <div
         className={`table-wrapper${hasHorizontalScrollOffset ? ' is-scrolled-x' : ''}${isResizingPlayerColumn ? ' is-resizing-col' : ''}`}
@@ -1217,7 +1261,24 @@ export default function ScoreTable({ players, scores, totalHoles, parValues, rou
       </div>
       {(matchInfo || (scrambleSideStrokes && matchup?.teams?.length)) && (
         <details className="matchup-handicap-disclosure">
-          <summary>Match info</summary>
+          <summary>
+            Match info
+            {onEditRound && (
+              <button
+                type="button"
+                className="round-edit-btn"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onEditRound();
+                }}
+                aria-label="Edit match"
+                title="Edit match"
+              >
+                <i className="bi bi-pencil" aria-hidden="true" />
+              </button>
+            )}
+          </summary>
           <div className="match-info-content">
             {matchInfo}
             {scrambleSideStrokes && matchup?.teams?.length && (

@@ -9,6 +9,7 @@ import type {
   TournamentSessionFormat,
 } from '../types/index.ts';
 import { getPlayerDisplayName } from '../tournaments/roundBuilder';
+import { isFieldPlacementDefinition } from '../tournaments/scoring';
 import './TournamentSessions.scss';
 
 export interface MatchDraft {
@@ -47,6 +48,7 @@ export default function TournamentMatchBuilder({
   const [sideEntryIds, setSideEntryIds] = useState<[string, string]>(['', '']);
   const [sidePlayerIds, setSidePlayerIds] = useState<[string[], string[]]>([[], []]);
   const [fieldPlayers, setFieldPlayers] = useState<Array<{ entryId: string; playerId: string }>>([]);
+  const [fieldEntryIds, setFieldEntryIds] = useState<string[]>([]);
   const [error, setError] = useState('');
 
   const requiredSets = Math.max(1, Math.round(session.holes / 9));
@@ -55,6 +57,8 @@ export default function TournamentMatchBuilder({
   const scorecard = scorecards.find((item) => item.id === scorecardId) ?? null;
   // Stroke play is a field, so any number of players from any teams can share one card.
   const isStrokeField = formatDefinition.baseFormat === 'stroke' && !formatDefinition.hasTeams;
+  // A team field puts every team on the same card, each playing for itself.
+  const isTeamField = isFieldPlacementDefinition(formatDefinition);
 
   const getEntry = (entryId: string) => entries.find((entry) => entry.id === entryId) ?? null;
 
@@ -151,6 +155,13 @@ export default function TournamentMatchBuilder({
     );
   };
 
+  const toggleFieldEntry = (entryId: string) => {
+    setError('');
+    setFieldEntryIds((prev) =>
+      prev.includes(entryId) ? prev.filter((id) => id !== entryId) : [...prev, entryId]
+    );
+  };
+
   const handleCreate = () => {
     if (!scorecard) {
       setError('Choose a course for this match.');
@@ -177,6 +188,25 @@ export default function TournamentMatchBuilder({
         sides: fieldPlayers.map((item) => ({
           entryId: item.entryId,
           playerIds: [item.playerId],
+          scores: Array.from({ length: session.holes }, () => 0),
+        })),
+      });
+      return;
+    }
+
+    if (isTeamField) {
+      if (fieldEntryIds.length < 2) {
+        setError('Pick at least two teams for this match.');
+        return;
+      }
+
+      onCreate({
+        name: name.trim(),
+        scorecard,
+        setIndexes,
+        sides: fieldEntryIds.map((entryId) => ({
+          entryId,
+          playerIds: [...(getEntry(entryId)?.playerIds ?? [])],
           scores: Array.from({ length: session.holes }, () => 0),
         })),
       });
@@ -276,7 +306,29 @@ export default function TournamentMatchBuilder({
         </div>
       )}
 
-      {isStrokeField ? (
+      {isTeamField ? (
+        <div className="session-side">
+          <div className="session-field">
+            <span>Teams in this match ({fieldEntryIds.length} selected)</span>
+            {entries.length === 0 && (
+              <p className="session-empty">Add teams to the tournament first.</p>
+            )}
+            <div className="session-chip-row">
+              {entries.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className={`session-chip${fieldEntryIds.includes(entry.id) ? ' is-selected' : ''}`}
+                  onClick={() => toggleFieldEntry(entry.id)}
+                  disabled={isSaving}
+                >
+                  {getEntryLabel(entry)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : isStrokeField ? (
         <div className="session-side">
           <div className="session-field">
             <span>Players in this match ({fieldPlayers.length} selected)</span>

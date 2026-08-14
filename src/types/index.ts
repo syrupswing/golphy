@@ -84,6 +84,7 @@ export interface GameState {
   scorecardId?: string;
   scorecardName?: string;
   playedSetLabels?: string[];
+  useHandicaps?: boolean;
   matchup?: MatchupConfig;
 }
 

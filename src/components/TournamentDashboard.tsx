@@ -17,7 +17,9 @@ import {
   getSessionFormatDefinition,
 } from '../tournaments/scoring';
 import { buildMatchRoundState } from '../tournaments/roundBuilder';
+import { buildLeaderboard, buildStandingsBoard, type LeaderboardScope } from '../tournaments/leaderboard';
 import TournamentSessions from './TournamentSessions';
+import TournamentLeaderboard from './TournamentLeaderboard';
 import type { MatchDraft } from './TournamentMatchBuilder';
 import './TournamentDashboard.scss';
 
@@ -28,6 +30,8 @@ interface TournamentDashboardProps {
   playerProfiles: PlayerProfile[];
   scorecards: Scorecard[];
   clientId: string;
+  leaderboardScope?: LeaderboardScope | null;
+  onCloseLeaderboard?: () => void;
   onManage: () => void;
   onOpenRound: (roundId: string) => void;
 }
@@ -39,6 +43,8 @@ export default function TournamentDashboard({
   playerProfiles,
   scorecards,
   clientId,
+  leaderboardScope = null,
+  onCloseLeaderboard,
   onManage,
   onOpenRound,
 }: TournamentDashboardProps) {
@@ -298,11 +304,42 @@ export default function TournamentDashboard({
   const leader = standings[0];
   const isOutrightLeader = Boolean(leader && (standings[1]?.points ?? -1) < leader.points);
 
+  if (leaderboardScope) {
+    const board =
+      leaderboardScope.type === 'tournament'
+        ? buildStandingsBoard(tournament, standings, getEntryName)
+        : buildLeaderboard(
+            { ...tournament, sessions },
+            sessions,
+            roundStates,
+            leaderboardScope,
+            getEntryName
+          );
+
+    return (
+      <div className="tournament-dashboard">
+        <div className="tournament-dashboard-header">
+          <div>
+            <p>{board?.title ?? tournament.name}</p>
+          </div>
+          {onCloseLeaderboard && (
+            <div className="tournament-dashboard-header-actions">
+              <button type="button" className="tournament-dashboard-manage" onClick={onCloseLeaderboard}>
+                Back to tournament
+              </button>
+            </div>
+          )}
+        </div>
+
+        <TournamentLeaderboard board={board} />
+      </div>
+    );
+  }
+
   return (
     <div className="tournament-dashboard">
       <div className="tournament-dashboard-header">
         <div>
-          <h2>{tournament.name}</h2>
           <p>
             {tournament.entries.length} {tournament.format === 'team' ? 'teams' : 'players'} ·{' '}
             {sessions.length} session{sessions.length === 1 ? '' : 's'} · {totalMatches} match

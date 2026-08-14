@@ -58,6 +58,10 @@ export const MATCHUP_FORMAT_PLAYER_COUNTS: Record<BuiltInTournamentMatchupFormat
 
 export const TEAM_MATCH_PLAY_SCRAMBLE_FORMAT_ID = 'team-match-play-scramble';
 export const TEAM_STROKE_SCRAMBLE_FORMAT_ID = 'team-stroke-scramble';
+export const TEAM_SCRAMBLE_FIELD_FORMAT_ID = 'team-scramble-field';
+
+// Placing points for a field format: 1st, 2nd, 3rd, then nothing.
+export const FIELD_PLACEMENT_POINTS = [4, 2, 1];
 
 const BASE_SCORING_MODE: Record<BuiltInTournamentMatchupFormat, SessionScoringMode> = {
   singles: 'match',
@@ -231,6 +235,18 @@ export const DEFAULT_TOURNAMENT_SESSION_FORMATS: TournamentSessionFormat[] = (
       rounding: 'nearest',
       prorateByHoles: false,
     },
+  }),
+  normalizeSessionFormat({
+    id: TEAM_SCRAMBLE_FIELD_FORMAT_ID,
+    name: 'Team scramble, every team for itself',
+    baseFormat: 'scramble',
+    scoringMode: 'stroke',
+    useHandicaps: false,
+    hasTeams: true,
+    ownBall: false,
+    playersPerSide: 4,
+    resultMode: 'net-total',
+    lineupRule: 'any',
   }),
 ]);
 
@@ -500,9 +516,100 @@ export const resolveMatchup = (
   };
 };
 
+export const isFieldPlacementDefinition = (format: TournamentSessionFormat): boolean => {
+  if (format.id === TEAM_SCRAMBLE_FIELD_FORMAT_ID) {
+    return true;
+  }
+
+  // Any team format scored as stroke play without a head-to-head handicap rule plays the field.
+  return format.hasTeams && format.scoringMode === 'stroke' && !format.handicapRule;
+};
+
+export const isFieldPlacementFormat = (
+  formatId: TournamentMatchupFormat,
+  customFormats: TournamentSessionFormat[] = []
+): boolean => isFieldPlacementDefinition(getSessionFormatDefinition(formatId, customFormats));
+
+// Places are scored 4/2/1/0; sides sharing a place split the points for those places.
+const awardPlacementPoints = (totals: (number | null)[]): number[] => {
+  const scored = totals
+    .map((total, sideIndex) => ({ total, sideIndex }))
+    .filter((entry): entry is { total: number; sideIndex: number } => entry.total !== null);
+
+  const points = totals.map(() => 0);
+  if (scored.length === 0) {
+    return points;
+  }
+
+  const ordered = [...scored].sort((left, right) => left.total - right.total);
+  let place = 0;
+
+  while (place < ordered.length) {
+    const tiedTotal = ordered[place].total;
+    const tied = ordered.filter((entry) => entry.total === tiedTotal);
+    const sharedPoints =
+      tied.reduce((sum, _entry, offset) => sum + (FIELD_PLACEMENT_POINTS[place + offset] ?? 0), 0) /
+      tied.length;
+
+    tied.forEach((entry) => {
+      points[entry.sideIndex] = sharedPoints;
+    });
+
+    place += tied.length;
+  }
+
+  return points;
+};
+
+const getSegmentTotals = (
+  matchup: TournamentMatchup,
+  startHole: number,
+  endHole: number
+): (number | null)[] =>
+  matchup.sides.map((side) => {
+    let total = 0;
+
+    for (let hole = startHole; hole <= endHole; hole += 1) {
+      const score = getHoleScore(side, hole - 1);
+      // An unfinished segment cannot be placed.
+      if (!score) {
+        return null;
+      }
+
+      total += score;
+    }
+
+    return total;
+  });
+
+// Every team plays the field: points are awarded for the front nine, the back nine and the total.
+export const resolveFieldPlacementPoints = (
+  matchup: TournamentMatchup,
+  holesInMatch?: number
+): number[] => {
+  const holes = normalizeSessionHoleCount(holesInMatch);
+  const segments: Array<[number, number]> = [];
+
+  for (let start = 1; start + HOLES_PER_MATCH - 1 <= holes; start += HOLES_PER_MATCH) {
+    segments.push([start, start + HOLES_PER_MATCH - 1]);
+  }
+
+  // A single nine is already the overall result, so it is only scored once.
+  if (segments.length > 1) {
+    segments.push([1, holes]);
+  }
+
+  return segments.reduce<number[]>(
+    (totals, [start, end]) => {
+      const points = awardPlacementPoints(getSegmentTotals(matchup, start, end));
+      return totals.map((value, sideIndex) => value + points[sideIndex]);
+    },
+    matchup.sides.map(() => 0)
+  );
+};
+
 // Kept here rather than in the Firestore module so components can build rounds without a circular import.
-const createLocalId = (): string => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+const createLocalId = (): string => {  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
 
@@ -699,13 +806,23 @@ export const calculateStandings = (
         return;
       }
 
+      const placementPoints = isFieldPlacementFormat(session.format, tournament.sessionFormats ?? [])
+        ? resolveFieldPlacementPoints(matchup, session.holes)
+        : null;
+
       matchup.sides.forEach((side, index) => {
         if (!side.entryId) return;
 
         const row = rowFor(side.entryId);
         // A stroke play field can have several sides sharing the leading score.
         const isLeader = result.winningSideIndexes.includes(index);
-        const earned = isLeader ? (result.isTie ? POINTS_FOR_TIE : POINTS_FOR_WIN) : 0;
+        const earned = placementPoints
+          ? placementPoints[index]
+          : isLeader
+            ? result.isTie
+              ? POINTS_FOR_TIE
+              : POINTS_FOR_WIN
+            : 0;
 
         row.matchesPlayed += 1;
         row.projectedPoints += earned;
