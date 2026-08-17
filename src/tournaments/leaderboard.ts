@@ -10,8 +10,6 @@ export interface LeaderboardRow {
   id: string;
   name: string;
   detail?: string;
-  // Strokes to par carried in from earlier sessions.
-  prior: number | null;
   // Cumulative strokes to par through each hole.
   toPar: (number | null)[];
   total: number | null;
@@ -95,46 +93,10 @@ const buildSideRow = (
     id: `${matchup.id}-${side?.entryId || sideIndex}`,
     name,
     detail,
-    prior: null,
     toPar,
     total: holesPlayed > 0 ? running : null,
     holesPlayed,
   };
-};
-
-// Strokes to par an entry carries in from the sessions played before the one on the board.
-const buildPriorToPar = (
-  priorSessions: TournamentSession[],
-  roundStates: Record<string, GameState>
-): Record<string, number> => {
-  const prior: Record<string, number> = {};
-
-  priorSessions.forEach((session) => {
-    session.matchups.forEach((matchup) => {
-      const pars = getPars(matchup.roundId ? roundStates[matchup.roundId] : undefined, session.holes);
-
-      matchup.sides.forEach((side) => {
-        if (!side.entryId) return;
-
-        let toPar = 0;
-        let played = false;
-
-        for (let hole = 0; hole < session.holes; hole += 1) {
-          const strokes = side.scores?.[hole];
-          if (!Number.isFinite(strokes) || (strokes as number) <= 0) continue;
-
-          toPar += (strokes as number) - (pars[hole] ?? DEFAULT_PAR);
-          played = true;
-        }
-
-        if (played) {
-          prior[side.entryId] = (prior[side.entryId] ?? 0) + toPar;
-        }
-      });
-    });
-  });
-
-  return prior;
 };
 
 const hasAnyScore = (session: TournamentSession): boolean =>
@@ -144,8 +106,8 @@ const hasAnyScore = (session: TournamentSession): boolean =>
 
 const sortRows = (rows: LeaderboardRow[]): LeaderboardRow[] =>
   [...rows].sort((left, right) => {
-    const leftTotal = left.total === null ? null : left.total + (left.prior ?? 0);
-    const rightTotal = right.total === null ? null : right.total + (right.prior ?? 0);
+    const leftTotal = left.total;
+    const rightTotal = right.total;
 
     if (leftTotal === null && rightTotal === null) return left.name.localeCompare(right.name);
     if (leftTotal === null) return 1;
@@ -210,7 +172,7 @@ export const buildLeaderboard = (
     title = boardSession.name;
     subtitle = tournament.name;
   } else {
-    // The tournament board shows the session in play, with earlier sessions carried as prior scores.
+    // The tournament board falls back to the session in play.
     boardSession = [...sessions].reverse().find(hasAnyScore) ?? sessions[sessions.length - 1];
     matchups = boardSession.matchups;
     title = tournament.name;
@@ -221,27 +183,19 @@ export const buildLeaderboard = (
   const parSource = matchups.find((matchup) => matchup.roundId && roundStates[matchup.roundId]);
   const pars = getPars(parSource?.roundId ? roundStates[parSource.roundId] : undefined, holes);
 
-  const boardSessionIndex = sessions.findIndex((session) => session.id === boardSession?.id);
-  const priorToPar =
-    scope.type === 'match' || scope.type === 'session' || boardSessionIndex > 0
-      ? buildPriorToPar(sessions.slice(0, Math.max(0, boardSessionIndex)), roundStates)
-      : {};
-
   const rows = matchups.flatMap((matchup) => {
     const matchupPars = getPars(matchup.roundId ? roundStates[matchup.roundId] : undefined, holes);
 
-    return matchup.sides.map((side, sideIndex) => {
-      const row = buildSideRow(
+    return matchup.sides.map((side, sideIndex) =>
+      buildSideRow(
         matchup,
         sideIndex,
         matchupPars,
         holes,
         getEntryName(side.entryId),
         matchups.length > 1 ? matchup.name?.trim() || undefined : undefined
-      );
-
-      return { ...row, prior: priorToPar[side.entryId] ?? null };
-    });
+      )
+    );
   });
 
   return {

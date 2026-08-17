@@ -316,19 +316,35 @@ export default function TournamentDashboard({
             getEntryName
           );
 
+    const scopedRoundId =
+      leaderboardScope.type === 'match'
+        ? sessions
+            .find((session) => session.id === leaderboardScope.sessionId)
+            ?.matchups.find((matchup) => matchup.id === leaderboardScope.matchupId)?.roundId
+        : undefined;
+
     return (
       <div className="tournament-dashboard">
         <div className="tournament-dashboard-header">
           <div>
             <p>{board?.title ?? tournament.name}</p>
           </div>
-          {onCloseLeaderboard && (
-            <div className="tournament-dashboard-header-actions">
+          <div className="tournament-dashboard-header-actions">
+            {scopedRoundId && (
+              <button
+                type="button"
+                className="tournament-dashboard-manage"
+                onClick={() => onOpenRound(scopedRoundId)}
+              >
+                View scorecard
+              </button>
+            )}
+            {onCloseLeaderboard && (
               <button type="button" className="tournament-dashboard-manage" onClick={onCloseLeaderboard}>
                 Back to tournament
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <TournamentLeaderboard board={board} />

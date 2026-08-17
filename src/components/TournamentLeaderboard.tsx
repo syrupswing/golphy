@@ -75,17 +75,11 @@ export default function TournamentLeaderboard({ board, emptyMessage }: Tournamen
 
 function HoleTable({ board }: { board: Extract<LeaderboardView, { kind: 'holes' }> }) {
   const holes = board.pars.map((_, index) => index + 1);
-  const hasPrior = board.rows.some((row) => row.prior !== null);
 
   return (
     <table className="masters-board-table">
       <thead>
         <tr>
-          {hasPrior && (
-            <th className="masters-prior" rowSpan={2}>
-              Prior
-            </th>
-          )}
           <th className="masters-label">Hole</th>
           {holes.map((hole) => (
             <th key={hole} className="masters-hole">
@@ -106,27 +100,20 @@ function HoleTable({ board }: { board: Extract<LeaderboardView, { kind: 'holes' 
         </tr>
       </thead>
       <tbody>
-        {board.rows.map((row) => {
-          const total = row.total === null ? null : row.total + (row.prior ?? 0);
-
-          return (
-            <tr key={row.id}>
-              {hasPrior && (
-                <td className={`masters-prior${toParClass(row.prior)}`}>{formatToPar(row.prior)}</td>
-              )}
-              <td className="masters-name">
-                <span className="masters-name-text">{row.name}</span>
-                {row.detail && <span className="masters-name-detail">{row.detail}</span>}
+        {board.rows.map((row) => (
+          <tr key={row.id}>
+            <td className="masters-name">
+              <span className="masters-name-text">{row.name}</span>
+              {row.detail && <span className="masters-name-detail">{row.detail}</span>}
+            </td>
+            {row.toPar.map((value, index) => (
+              <td key={holes[index]} className={`masters-score${toParClass(value)}`}>
+                {formatToPar(value)}
               </td>
-              {row.toPar.map((value, index) => (
-                <td key={holes[index]} className={`masters-score${toParClass(value)}`}>
-                  {formatToPar(value)}
-                </td>
-              ))}
-              <td className={`masters-total${toParClass(total)}`}>{formatToPar(total)}</td>
-            </tr>
-          );
-        })}
+            ))}
+            <td className={`masters-total${toParClass(row.total)}`}>{formatToPar(row.total)}</td>
+          </tr>
+        ))}
       </tbody>
     </table>
   );
